@@ -145,8 +145,8 @@ class Online_NTF():
         else:
             beta = self.beta
 
-        A1 = (1 - (t**(-beta)) * A + t**(-beta) * np.dot(H1.T, H1))
-        B1 = (1 - (t**(-beta)) * B + t**(-beta) * np.dot(H1.T, X.T))
+        A1 = (1 - (t**(-beta))) * A + t**(-beta) * np.dot(H1.T, H1)
+        B1 = (1 - (t**(-beta))) * B + t**(-beta) * np.dot(H1.T, X.T)
 
 
 
