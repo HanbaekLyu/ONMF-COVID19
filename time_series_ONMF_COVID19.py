@@ -17,6 +17,7 @@ DEBUG = False
 class time_series_tensor():
     def __init__(self,
                  path,
+                 country_list,
                  source,
                  n_components=100,  # number of dictionary elements -- rank
                  iterations=50,  # number of iterations for the ONTF algorithm
@@ -37,6 +38,7 @@ class time_series_tensor():
         '''
         self.path = path
         self.source = source
+        self.country_list = country_list
         self.n_components = n_components
         self.iterations = iterations
         self.sub_iterations = sub_iterations
@@ -65,16 +67,21 @@ class time_series_tensor():
                               ini_B=None,
                               batch_size=self.batch_size)
 
-    def read_timeseries_as_array(self, path):
+    def read_data_as_array_countrywise(self, path):
         '''
         Read input time series as a narray
         '''
         data_full = pd.read_csv(path, delimiter=',').T
         data = data_full.values[1:, :]
         data = np.delete(data, [1, 2], 0)  # delete lattitue & altitude
-        country_list = [i for i in set(data[0, :])]
-        country_list = sorted(country_list)
+        if self.country_list == None:
+            country_list = [i for i in set(data[0, :])]
+            country_list = sorted(country_list)  # whole countries in alphabetical order
+        else:
+            country_list = self.country_list
+        country_list
 
+        ### merge data according to country
         data_new = np.zeros(shape=(data.shape[0] - 1, len(country_list)))
         for i in np.arange(len(country_list)):
             idx = np.where(data[0, :] == country_list[i])
@@ -84,39 +91,57 @@ class time_series_tensor():
             data_new[:, i] = data_sub
         data_new = data_new.astype(int)
 
-        idx = np.where(data_new[-1, :] > 20000)
+        if self.country_list == None:
+            idx = np.where(data_new[-1, :] > 1000)
+            data_new = data_new[:, idx]
+            data_new = data_new[:, 0, :]
+            # data_new[:,1] = np.zeros(data_new.shape[0])
+            print('data_new', data_new)
+            country_list = [country_list[idx[0][i]] for i in range(len(idx[0]))]
+            print('country_list', country_list)
+
+        return data_new.T, country_list
+
+    def read_data_as_array_citywise(self, path):
+        '''
+        Read input time series as an array
+        '''
+        data_full = pd.read_csv(path, delimiter=',').T
+        data = data_full.values
+        data = np.delete(data, [2, 3], 0)  # delete lattitue & altitude
+        idx = np.where((data[1, :] == 'Korea, South') | (data[1, :] == 'Japan'))
+        data_sub = data[:, idx]
+        data_sub = data_sub[:, 0, :]
+        data_new = data_sub[2:, :].astype(int)
+
+        idx = np.where(data_new[-1, :] > 0)
         data_new = data_new[:,idx]
         data_new = data_new[:,0,:]
         # data_new[:,1] = np.zeros(data_new.shape[0])
-        print('data_new', data_new)
-        country_list = [country_list[idx[0][i]] for i in range(len(idx[0]))]
-        print('country_list', country_list)
+        city_list = data_sub[0,idx][0]
+        print('city_list', city_list)
 
-        return data_new.T, country_list
+        return data_new.T, city_list
 
     def combine_data(self, source):
         if len(source) == 1:
             for path in source:
-                data, country_list = self.read_timeseries_as_array(path)
-                data = np.expand_dims(data, axis=2)
+                data, country_list = self.read_data_as_array_countrywise(path)
+                data_combined = np.expand_dims(data, axis=2)
         else:
             path = source[0]
-            A, start_year = self.read_timeseries_as_array(path)
-            data_combined = np.empty(shape=[A.shape[0], A.shape[1], 1])
-            # print('data_combined.shape', data_combined.shape)
+            data, country_list = self.read_data_as_array_countrywise(path)
+            data_combined = np.empty(shape=[data.shape[0], data.shape[1], 1])
             for path in source:
-                data_new, start_year_new = self.read_timeseries_as_array(path)
-                start_year = np.maximum(start_year, start_year_new)
+                data_new = self.read_data_as_array_countrywise(path)[0]
                 data_new = np.expand_dims(data_new, axis=2)
-                # print('data_combined.shape', data_combined.shape)
                 # print('data_new.shape', data_new.shape)
                 min_length = np.minimum(data_combined.shape[1], data_new.shape[1])
-                # print(min_length)
-                # data_combined = np.append(data_combined[:,0:min_length, :], data_new[:,0:min_length, :], axis=2)
-                data_combined = np.append(data_combined[:, -min_length:, :], data_new[:, -min_length:, :], axis=2)
-            data_combined = data_combined[:, :, 1:] # get rid of the first empty slice
+                data_combined = np.append(data_combined[:, 0:min_length, :], data_new[:, 0:min_length, :], axis=2)
+            data_combined = data_combined[:, :, 1:]
+
             print('data_combined.shape', data_combined.shape)
-        return data, country_list
+        return data_combined, country_list
 
     def extract_random_patches(self, batch_size=None, time_interval_initial=None):
         '''
@@ -182,51 +207,83 @@ class time_series_tensor():
         print('patches.shape=', patches.shape)
         return patches
 
-    def display_dictionary(self, W):
+    def display_dictionary(self, W, cases, if_show, if_save, filenum):
         k = self.patch_size
         x = self.data.shape
         rows = np.floor(np.sqrt(self.n_components)).astype(int)
         cols = np.ceil(np.sqrt(self.n_components)).astype(int)
-        fig, axs = plt.subplots(nrows=rows, ncols=cols, figsize=(7, 5),
+        fig, axs = plt.subplots(nrows=6, ncols=6, figsize=(5, 5),
                                 subplot_kw={'xticks': [], 'yticks': []})
+        print('W.shape', W.shape)
+        # print('W', W)
+        if cases == 'confirmed':
+            c = 0
+        elif cases == 'death':
+            c = 1
+        else:
+            c = 2
+
         for axs, i in zip(axs.flat, range(self.n_components)):
             dict = W[:, i].reshape(x[0], k, x[2])
             for j in np.arange(dict.shape[0]):
-                axs.plot(np.arange(k), dict[j, :, 0], label=''+str(self.country_list[j]))
+                country_name = self.country_list[j]
+                if self.country_list[j] == 'Korea, South':
+                    country_name = 'Korea, S.'
+
+                axs.plot(np.arange(k), dict[j, :, c], label=''+str(country_name))
 
         handles, labels = axs.get_legend_handles_labels()
-        fig.legend(handles, labels, loc='lower center')
-        # plt.suptitle('Dictionary learned from segments of size %d' % k, fontsize=16)
-        plt.subplots_adjust(left=0.08, right=0.9, bottom=0.2, top=0.9, wspace=0.08, hspace=0.23)
+        fig.legend(handles, labels, loc='center right') ## bbox_to_anchor=(0,0)
+        # plt.suptitle(cases + '-Temporal Dictionary of size %d'% k, fontsize=16)
+        plt.subplots_adjust(left=0.01, right=0.75, bottom=0, top=0.99, wspace=0.08, hspace=0.23)
         # plt.tight_layout()
-        plt.show()
 
-    def display_prediction(self, source, prediction, error, print_learnevery=False):
-        prediction_length = self.prediction_length
+        if if_save:
+            plt.savefig('Time_series_dictionary/Dict-' + cases + '-' + str(filenum) + '.png')
+        if if_show:
+            plt.show()
+
+    def display_prediction(self, source, prediction, cases, if_show, if_save, filenum):
         A = self.combine_data(source)[0]
         k = self.patch_size
         A_predict = prediction
+        L = len(self.country_list)  # number of countries
+        rows = np.floor(np.sqrt(L)).astype(int)
+        cols = np.ceil(np.sqrt(L)).astype(int)
 
+        if cases == 'confirmed':
+            c = 0
+        elif cases == 'death':
+            c = 1
+        else:
+            c = 2
 
-        for j in np.arange(A.shape[0]):
-            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8, 5), sharex=True, sharey=True, gridspec_kw={'hspace': 0})
+        fig, axs = plt.subplots(nrows=2, ncols=3, figsize=(8, 6))
+        for axs, j in zip(axs.flat, range(L)):
+            country_name = self.country_list[j]
+            if self.country_list[j] == 'Korea, South':
+                country_name = 'Korea, S.'
 
-            ax.plot(np.arange(A.shape[1]), A[j,:,0], 'b-', label='Original_'+str(self.country_list[j]))
-            ax.plot(np.arange(self.patch_size, A_predict.shape[1]),
-                    A_predict[j, self.patch_size:A_predict.shape[1], 0],
-                    'r-', label='Reconstructed_'+str(self.country_list[j]))
-            ax.set_ylim(-10, np.max(A_predict[j, :, 0]) + 10)
+            axs.plot(np.arange(A.shape[1]), A[j, :, c], 'b-', label='Original-' + str(country_name))
+            axs.plot(np.arange(self.patch_size, A_predict.shape[1]),
+                    A_predict[j, self.patch_size:A_predict.shape[1], c],
+                    'r-', label='Recons.-' + str(country_name))
+            axs.set_ylim(-10, np.max(A_predict[j, :, c]) + 10)
             # ax.text(2, 0.65, str(list[j]))
-            ax.yaxis.set_label_position("right")
+            axs.yaxis.set_label_position("right")
             # ax.yaxis.set_label_coords(0, 2)
             # ax.set_ylabel(str(list[j]), rotation=90)
-            ax.legend(fontsize=15)
-            fig.suptitle('Plot of original and reconstruction' +
-                         "\n segment_length= %i, num_dictionaries = %i" % (self.patch_size, self.n_components),
-                         fontsize=15)
-            # plt.tight_layout()
-            plt.subplots_adjust(left=0.08, right=0.9, bottom=0.1, top=0.85, wspace=0.08, hspace=0.23)
-        plt.show()
+            axs.legend(fontsize=11)
+            fig.suptitle('Plot of original and reconstruction -- ' + 'COVID-19-'+ cases +
+                         "\n segment length = %i, # temporal dictionary components = %i" % (self.patch_size, self.n_components),
+                         fontsize=12, y=1)
+            plt.tight_layout(rect=[0, 0.03, 1, 0.9])
+            # plt.subplots_adjust(left=0.2, right=0.9, bottom=0.1, top=0.85, wspace=0.08, hspace=0.23)
+
+        if if_save:
+            plt.savefig('Time_series_dictionary/Plot-'+cases+'-'+str(filenum)+'.png')
+        if if_show:
+            plt.show()
 
     def train_dict(self, mode, beta, learn_joint_dict):
         print('training dictionaries from patches along mode %i...' % mode)
@@ -316,6 +373,7 @@ class time_series_tensor():
                                       beta=self.beta)  # max number of possible patches
                 W, At, Bt, H = self.ntf.train_dict_single()
                 self.W = W
+                # print('W', W)
 
                 # prediction step
                 patch = A[:, t - k + L:t, :]
@@ -328,7 +386,7 @@ class time_series_tensor():
                     self.ntf = Online_NTF(X, self.n_components,
                                           iterations=self.sub_iterations,
                                           batch_size=self.batch_size,
-                                          ini_dict=W,
+                                          ini_dict=self.W,
                                           ini_A=At,
                                           ini_B=Bt,
                                           learn_joint_dict=True,
@@ -347,9 +405,10 @@ class time_series_tensor():
                 # print('patch.shape', patch.shape)
                 patch_recons = self.predict_joint_single(patch)
                 A_recons = np.append(A_recons, patch_recons, axis=1)
+            print('Current iteration %i out of %i' % (t, self.iterations))
 
         for t in np.arange(A.shape[1], A.shape[1]+future_extraploation_length):
-            ### prediction continuation into the future
+            ### predictive continuation into the future
             patch = A_recons[:, t - k + L:t, :]
             # print('patch.shape', patch.shape)
             patch_recons = self.predict_joint_single(patch)
@@ -370,6 +429,8 @@ class time_series_tensor():
         print('code_shape:', self.code.shape)
         np.save('Time_series_dictionary/dict_learned_tensor' + str(mode) + 'joint', self.W)
         np.save('Time_series_dictionary/code_learned_tensor' + str(mode) + 'joint', self.code)
+        np.save('Time_series_dictionary/At' + str(mode) + 'joint', At)
+        np.save('Time_series_dictionary/Bt' + str(mode) + 'joint', Bt)
         np.save('Time_series_dictionary/recons', A_recons)
         print('A_reconst.shape', A_recons.shape)
         return A_recons, error, W, At, Bt, H
@@ -380,15 +441,14 @@ class time_series_tensor():
         A = data  # A.shape = (self.data.shape[0], k-L, self.data.shape[2])
         is_prediction_correct = np.zeros(shape=(A.shape[0], k - 1, A.shape[2]))
         # A_recons = np.zeros(shape=(A.shape[0], k, A.shape[2]))
-        # A_recons_dummy = np.zeros(shape=A.shape)
-        # A_recons_dummy[:, 1:A.shape[1]] = A[:, 0:A.shape[1] - 1]
         # W_tensor = self.W.reshape((k, A.shape[0], -1))
         # print('A.shape', A.shape)
         W_tensor = self.W.reshape((self.data.shape[0], k, self.data.shape[2], -1))
         # print('W.shape', W_tensor.shape)
 
+        # for missing data, not needed for the COVID-19 data set
         # extract only rows of nonnegative values (disregarding missing entries) (negative = N/A)
-        J = np.where(np.min(A, axis=(0,1)) >= 0)  # damn, this took long
+        J = np.where(np.min(A, axis=(0,1)) >= -1)  # damn, this took long
         A_pos = A[:,:,J]
         # print('A_pos', A_pos)
         # print('np.min(A)', np.min(A))
@@ -396,16 +456,18 @@ class time_series_tensor():
         W_trimmed = W_tensor[:, 0:k - L, :, :]
         W_trimmed = W_trimmed.reshape((-1, self.n_components))
 
-        t0 = time()
-
         patch = A_pos
+
+        # print('patch', patch)
 
         patch = patch.reshape((-1, 1))
         # print('patch.shape', patch.shape)
 
+        # print('patch', patch)
+
         coder = SparseCoder(dictionary=W_trimmed.T, transform_n_nonzero_coefs=None,
-                            transform_alpha=0.2, transform_algorithm='lasso_lars', positive_code=True)
-        # alpha = L1 regularization parameter. alpha=2 makes all codes zero (why?)
+                            transform_alpha=1, transform_algorithm='lasso_lars', positive_code=True)
+        # alpha = L1 regularization parameter
         code = coder.transform(patch.T)
         patch_recons = np.dot(self.W, code.T).T  # This gives prediction on the last L missing entries
         patch_recons = patch_recons.reshape(-1, k, A.shape[2])
@@ -417,25 +479,30 @@ class time_series_tensor():
 
 def main():
 
-    path_confirmed = "COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv"
-    path_deaths = "COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Deaths.csv"
-    path_recovered = "COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Recovered.csv"
+    path_confirmed = "COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"
+    path_deaths = "COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"
+    path_recovered = "COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_recovered_global.csv"
 
-    source = [path_confirmed]
-    # source = [path_confirmed, path_deaths, path_recovered]
+    # source = [path_deaths]
+    source = [path_confirmed, path_deaths, path_recovered]
     # source = [path3]
+
+    country_list = ['Korea, South', 'China', 'Japan', 'US', 'Italy', 'Spain']
+    # country_list = ['US']
+    cases = 'death'  ### cases = one of ['confirmed', 'death', 'recovered']
 
 
     reconstructor = time_series_tensor(path=path_confirmed,
                                        source=source,
-                                       beta = 0.1,  # learning rate exponent -- smaller weighs new data more
-                                       n_components=9,  # number of dictionary elements -- rank
-                                       iterations=100,  # number of iterations for the ONTF algorithm
+                                       country_list = country_list,
+                                       beta = 0.01,  # learning rate exponent -- smaller weighs new data more
+                                       n_components=36,  # number of dictionary elements -- rank
+                                       iterations=200,  # number of iterations for the ONTF algorithm
                                        sub_iterations=2,  # number of i.i.d. subsampling for each iteration of ONTF
                                        batch_size=50,  # number of patches used in i.i.d. subsampling
                                        num_patches_perbatch=100,  # number of patches per ONMF iteration (size of mini batch)
                                        # number of patches that ONTF algorithm learns from at each iteration
-                                       patch_size=5,
+                                       patch_size=20,
                                        patches_file='',
                                        learn_joint_dict=False,
                                        prediction_length=1,
@@ -445,9 +512,10 @@ def main():
     W, At, Bt, H = reconstructor.train_dict(mode=3,
                                             beta=1,
                                             learn_joint_dict=True)
-    print('W.shape', W.shape)
+
     # W = np.load("Time_series_dictionary\dict_learned_tensor3joint.npy")
-    reconstructor.display_dictionary(W)
+    # At = np.load("Time_series_dictionary\At3joint.npy")
+    # Bt = np.load("Time_series_dictionary\Bt3joint.npy")
 
     A_predict, error, W, At, Bt, H = reconstructor.online_learning_and_prediction(mode=3,
                                                                                   ini_dict=W,
@@ -456,8 +524,15 @@ def main():
                                                                                   future_extraploation_length = 5)
 
     # print(A_predict)
-    reconstructor.display_prediction(source, A_predict, error, print_learnevery=True)
-    reconstructor.display_dictionary(reconstructor.W)
+    # reconstructor.display_dictionary(W, cases=cases)
+    filenum=8
+    reconstructor.display_dictionary(W, cases='confirmed', if_show=False, if_save=True, filenum=filenum)
+    reconstructor.display_dictionary(W, cases='death', if_show=False, if_save=True, filenum=filenum)
+    reconstructor.display_dictionary(W, cases='recovered', if_show=False, if_save=True, filenum=filenum)
+    reconstructor.display_prediction(source, A_predict, cases='confirmed', if_show=False, if_save=True, filenum=filenum)
+    reconstructor.display_prediction(source, A_predict, cases='death', if_show=False, if_save=True, filenum=filenum)
+    reconstructor.display_prediction(source, A_predict, cases='recovered', if_show=False, if_save=True, filenum=filenum)
+
 
 
 if __name__ == '__main__':
