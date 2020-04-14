@@ -53,7 +53,6 @@ class Online_NTF():
         self.beta = beta
         self.mode = mode  # mode of unfolding the input tensor to learn marginal dictioanry by OMF problem
         self.learn_joint_dict = learn_joint_dict
-        self.code = np.zeros(shape=(X.shape[1], n_components))
         self.subsample = subsample
 
     def joint_sparse_code_tensor(self, X, W):
@@ -144,6 +143,7 @@ class Online_NTF():
             beta = 1
         else:
             beta = self.beta
+
         A1 = (1 - (t**(-beta))) * A + t**(-beta) * np.dot(H1.T, H1)
         B1 = (1 - (t**(-beta))) * B + t**(-beta) * np.dot(H1.T, X.T)
 
@@ -200,8 +200,8 @@ class Online_NTF():
         '''
 
         r = self.n_components
-        code = self.code
 
+        ### matricize the tensor input
         if not self.learn_joint_dict:
             X_unfold = tl_unfold(self.X, mode=self.mode)
             d, n = X_unfold.shape
@@ -213,9 +213,9 @@ class Online_NTF():
             # initialize dictionary matrix W with random values
             # and initialize aggregate matrices A, B with zeros
             W = np.random.rand(d, r)
-            print('W.shape', W.shape)
-            A = np.zeros((r, r))
-            B = np.zeros((r, d))
+            # print('W.shape', W.shape)
+            A = np.zeros(shape=(r, r))
+            B = np.zeros(shape=(r, d))
             t0 = self.history
         else:
             W = self.initial_dict
@@ -223,21 +223,31 @@ class Online_NTF():
             B = self.initial_B
             t0 = self.history
 
+        if self.initial_A is None:
+            A = np.zeros(shape=(r, r))
+        if self.initial_B is None:
+            B = np.zeros(shape=(r, d))
+
+        code = np.zeros(shape=(r, n))
+
         for i in np.arange(1, self.iterations):
             # randomly choose batch_size number of columns to sample
 
             # initializing the "batch" of X, which are the subset
             # of columns from X_unfold that were randomly chosen above
+
             if self.subsample:
                 idx = np.random.randint(n, size=self.batch_size)
                 X_batch = X_unfold[:, idx]
+                H, A, B, W = self.step(X_batch, A, B, W, t0 + i)
+                code[:, idx] += H.T
             else:
                 X_batch = X_unfold
+                H, A, B, W = self.step(X_batch, A, B, W, t0 + i)
+                code += H.T
             # iteratively update W using batches of X, along with
             # iteratively updated values of A and B
             # print('X.shape before training step', self.X.shape)
-            H, A, B, W = self.step(X_batch, A, B, W, t0 + i)
-            # code[idx,:] += H
             # print('dictionary=', W)
             # print('code=', H)
             # plt.matshow(H)
