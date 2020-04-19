@@ -2,7 +2,7 @@
 Time series applications of onlien NMF on COVID19 data sets \
 Learns dictionary atoms for short time-evolution patterns of multiple countries or counties, and uses them to predict future values
 
-![](Images/Plot-death.png)
+![](Images/Pplot-death-dict.png)
 
 ## References
 
