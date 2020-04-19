@@ -1,5 +1,5 @@
 # ONMF-COVID19
-Time series applications of onlien NMF on COVID19 data sets
+Time series applications of onlien NMF on COVID19 data sets \\
 Learns dictionary atoms for short time-evolution patterns of multiple countries or counties, and uses them to predict future values
 
 ## References
