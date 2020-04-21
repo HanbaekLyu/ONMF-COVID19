@@ -9,7 +9,8 @@ Learns dictionary atoms for short time-evolution patterns of multiple countries 
 These codes are based on my paper below: 
   1. Hanbaek Lyu, Christopher Strohmeier, Deanna Needell, and Georg Menz, 
      “COVID-19 Time Series Prediction by Joint Dictionary Learning and Online NMF” 
-     https://arxiv.org/abs/(will be announced shortly)
+     https://arxiv.org/abs/2004.09112
+
 
 ## File description 
 
