@@ -1,0 +1,13 @@
+LICENSE
+MANIFEST.in
+README.md
+setup.cfg
+setup.py
+src/ONMF-COVID19/__init__.py
+src/ONMF-COVID19/example.py
+src/ONMF_COVID19.egg-info/PKG-INFO
+src/ONMF_COVID19.egg-info/SOURCES.txt
+src/ONMF_COVID19.egg-info/dependency_links.txt
+src/ONMF_COVID19.egg-info/not-zip-safe
+src/ONMF_COVID19.egg-info/requires.txt
+src/ONMF_COVID19.egg-info/top_level.txt
