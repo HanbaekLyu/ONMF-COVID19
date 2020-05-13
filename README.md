@@ -21,7 +21,9 @@ These codes are based on my paper below:
 ## Usage
   1. git clone this repository
   2. git clone https://github.com/CSSEGISandData/COVID-19 inside ONMF-COVID19
-  3. run main.py 
+  3. Modify the path of the dataset folder "csse_covid_19 time series"
+  4. Change the name of the folder joint10_00_4_1000 to joint12_00_4_1000
+  4. run main.py 
   
 ## Authors
 
