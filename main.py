@@ -1,30 +1,24 @@
-from time_series_ONMF_COVID19 import time_series_tensor
+#!/users/colou/Miniconda3/tensorflow/python.exe
+
+from utils.time_series_ONMF_COVID19 import time_series_tensor
 import numpy as np
-from PIL import Image
-from skimage.transform import downscale_local_mean
-from sklearn.feature_extraction.image import extract_patches_2d
-from sklearn.feature_extraction.image import reconstruct_from_patches_2d
-from sklearn.decomposition import SparseCoder
-import itertools
-from time import time
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import datetime
+
 
 def main_train_joint():
     print('pre-training temporal dictionary started...')
 
-    path_confirmed = "COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"
-    path_deaths = "COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"
-    path_recovered = "COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_recovered_global.csv"
+    path_confirmed = "Data/COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"
+    path_deaths = "Data/COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"
+    path_recovered = "Data/COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_recovered_global.csv"
 
-    foldername = 'joint12_00_4_1000'  ## for saving files
-    source = [path_confirmed, path_deaths, path_recovered]
+    foldername = 'test'  ## for saving files
+    # source = [path_confirmed, path_deaths, path_recovered]
+    source = [path_confirmed, path_deaths]
 
     n_components = 50
 
-    country_list = ['Korea, South', 'China', 'US', 'Italy', 'Germany', 'Spain']
+    # country_list = ['Korea, South', 'China', 'US', 'Italy', 'Germany', 'Spain']
+    country_list = ['Russia', 'Brazil']
     reconstructor = time_series_tensor(path=path_confirmed,
                                        source=source,
                                        country_list=country_list,
@@ -47,8 +41,8 @@ def main_train_joint():
                                        if_moving_avg_data=True,
                                        if_log_scale=True)
 
-    L = 30
-    avg_iter = 1000
+    L = 7 ## prediction length
+    avg_iter = 10
     A_recons = []
     # W_old = W.copy()
     for step in np.arange(avg_iter):

@@ -1,16 +1,8 @@
-from ontf import Online_NTF
+from utils.ontf import Online_NTF
 import numpy as np
-from PIL import Image
-from skimage.transform import downscale_local_mean
-from sklearn.feature_extraction.image import extract_patches_2d
-from sklearn.feature_extraction.image import reconstruct_from_patches_2d
 from sklearn.decomposition import SparseCoder
-import itertools
-from time import time
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import datetime
 
 DEBUG = False
 
@@ -64,6 +56,7 @@ class time_series_tensor():
         # read in time series data as array
         # self.data = self.read_timeseries_as_array(self.path)
         self.data, self.country_list = self.combine_data(self.source)
+        print('data', self.data)
         print('data.shape', self.data.shape)
         self.ntf = Online_NTF(self.data, self.n_components,
                               iterations=self.sub_iterations,
