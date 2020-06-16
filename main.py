@@ -13,12 +13,12 @@ def main_train_joint():
 
     foldername = 'test'  ## for saving files
     # source = [path_confirmed, path_deaths, path_recovered]
-    source = [path_confirmed, path_deaths]
+    source = [path_confirmed, path_deaths, path_recovered]
 
     n_components = 50
 
-    # country_list = ['Korea, South', 'China', 'US', 'Italy', 'Germany', 'Spain']
-    country_list = ['Russia', 'Brazil']
+    country_list = ['Korea, South', 'China', 'US', 'Italy', 'Germany', 'Spain']
+    # country_list = ['Russia', 'Brazil']
     reconstructor = time_series_tensor(path=path_confirmed,
                                        source=source,
                                        country_list=country_list,
@@ -41,8 +41,8 @@ def main_train_joint():
                                        if_moving_avg_data=True,
                                        if_log_scale=True)
 
-    L = 7 ## prediction length
-    avg_iter = 10
+    L = 30 ## prediction length
+    avg_iter = 2
     A_recons = []
     # W_old = W.copy()
     for step in np.arange(avg_iter):

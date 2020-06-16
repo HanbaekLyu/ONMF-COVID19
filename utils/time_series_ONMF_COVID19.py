@@ -153,6 +153,11 @@ class time_series_tensor():
             data_combined = data_combined[:, :, 1:]
 
             print('data_combined.shape', data_combined.shape)
+        # data_full.replace(np.nan, 0)  ### replace all NANs with 0
+
+        ### Replace all NANs in data_combined with 0
+        where_are_NaNs = np.isnan(data_combined)
+        data_combined[where_are_NaNs] = 0
         return data_combined, country_list
 
     def extract_random_patches(self, batch_size=None, time_interval_initial=None):

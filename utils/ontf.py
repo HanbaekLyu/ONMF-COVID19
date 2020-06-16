@@ -3,7 +3,7 @@
 
 # import tensorflow as tf
 import numpy as np
-import progressbar
+# import progressbar
 # import imageio
 import matplotlib.pyplot as plt
 from numpy import linalg as LA
