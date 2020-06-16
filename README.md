@@ -20,7 +20,7 @@ These codes are based on my paper below:
 
 ## Usage
   1. git clone this repository
-  2. git clone https://github.com/CSSEGISandData/COVID-19 inside ONMF-COVID19
+  2. git clone https://github.com/CSSEGISandData/COVID-19 inside ONMF-COVID19/Data
   3. run main.py 
   
 ## Authors
