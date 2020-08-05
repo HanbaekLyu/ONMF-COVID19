@@ -11,23 +11,36 @@ def main_train_joint():
     path_deaths = "Data/COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"
     path_recovered = "Data/COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_recovered_global.csv"
 
+    path_COVIDactnow = "Data/states.NO_INTERVENTION.timeseries.csv"
+
     foldername = 'test'  ## for saving files
     # source = [path_confirmed, path_deaths, path_recovered]
-    source = [path_confirmed, path_deaths, path_recovered]
+    # source = [path_confirmed, path_deaths, path_recovered]
+    source = [path_COVIDactnow]
 
-    n_components = 50
+    n_components = 16
 
-    country_list = ['Korea, South', 'China', 'US', 'Italy', 'Germany', 'Spain']
+    # country_list = ['Korea, South', 'China', 'US', 'Italy', 'Germany', 'Spain']
+    state_list = ['California']
     # country_list = ['Russia', 'Brazil']
-    reconstructor = time_series_tensor(path=path_confirmed,
+
+    if_covidactnow = True
+    if_train_fresh = True
+    if_display_dict = True
+    if_recons = True
+    L = 7  ## prediction length
+    avg_iter = 2
+
+    reconstructor = time_series_tensor(path=path_COVIDactnow,
                                        source=source,
-                                       country_list=country_list,
+                                       country_list=None,
+                                       state_list=state_list,
                                        alpha=3,  # L1 sparsity regularizer
                                        beta=1,  # default learning exponent --
                                        # customized in both trianing and online prediction functions
                                        # learning rate exponent in online learning -- smaller weighs new data more
                                        n_components=n_components,  # number of dictionary elements -- rank
-                                       iterations=20,  # number of iterations for the ONTF algorithm
+                                       iterations=50,  # number of iterations for the ONTF algorithm
                                        sub_iterations=2,  # number of i.i.d. subsampling for each iteration of ONTF
                                        batch_size=50,  # number of patches used in i.i.d. subsampling
                                        num_patches_perbatch=100,
@@ -37,12 +50,12 @@ def main_train_joint():
                                        prediction_length=1,
                                        learnevery=1,
                                        subsample=False,
+                                       if_covidactnow=if_covidactnow,
                                        if_onlynewcases=True,   # take the derivate of the time-series of total to get new cases
                                        if_moving_avg_data=True,
                                        if_log_scale=True)
 
-    L = 30 ## prediction length
-    avg_iter = 2
+
     A_recons = []
     # W_old = W.copy()
     for step in np.arange(avg_iter):
@@ -52,26 +65,28 @@ def main_train_joint():
         reconstructor.code = np.zeros(shape=(n_components, 100))
 
         ### Minibatch dictionary learning
-        W, At, Bt, H = reconstructor.train_dict(mode=3,
-                                                foldername=foldername,
-                                                alpha=1,  ## L1 regularizer for sparse coding
-                                                beta=1,  ## learning rate exponent in pre-learning
-                                                learn_joint_dict=True)
+        if if_train_fresh:
+            W, At, Bt, H = reconstructor.train_dict(mode=3,
+                                                    foldername=foldername,
+                                                    alpha=1,  ## L1 regularizer for sparse coding
+                                                    beta=1,  ## learning rate exponent in pre-learning
+                                                    learn_joint_dict=True)
 
-        ### Online dictionary learning and predictoin
-        A_predict, error, W1, At1, Bt1, H = reconstructor.online_learning_and_prediction(mode=3,
-                                                                                         ini_dict=W,
-                                                                                         foldername=foldername,
-                                                                                         beta=4,  # no effect if "if_learn_online" is false
-                                                                                         ini_A=At,
-                                                                                         ini_B=Bt,
-                                                                                         a1=0, # regularizer for training
-                                                                                         a2=0, # regularizer for prediction
-                                                                                         future_extraploation_length=L,
-                                                                                         if_learn_online = True,
-                                                                                         if_save=True)
+        if if_recons:
+        ### Online dictionary learning and prediction
+            A_predict, error, W1, At1, Bt1, H = reconstructor.online_learning_and_prediction(mode=3,
+                                                                                             ini_dict=W,
+                                                                                             foldername=foldername,
+                                                                                             beta=4,  # no effect if "if_learn_online" is false
+                                                                                             ini_A=At,
+                                                                                             ini_B=Bt,
+                                                                                             a1=0, # regularizer for training
+                                                                                             a2=0, # regularizer for prediction
+                                                                                             future_extraploation_length=L,
+                                                                                             if_learn_online = True,
+                                                                                             if_save=True)
 
-        A_recons.append(A_predict.tolist())
+            A_recons.append(A_predict.tolist())
         print('Current iteration %i out of %i' % (step, avg_iter))
 
     A_recons = np.asarray(A_recons)
@@ -87,20 +102,35 @@ def main_train_joint():
     A_recons = np.load("Time_series_dictionary/" + str(foldername) + "/recons_nononline.npy")
     '''
 
-    ### plot minibatch-trained dictionary (from last iteration)
-    reconstructor.display_dictionary(W, cases='confirmed', if_show=True, if_save=True, foldername=foldername, filename='minibatch')
-    reconstructor.display_dictionary(W, cases='death', if_show=True, if_save=True, foldername=foldername, filename='minibatch')
-    reconstructor.display_dictionary(W, cases='recovered', if_show=True, if_save=True, foldername=foldername, filename='minibatch')
+    if if_display_dict and not if_covidactnow:
+        ### plot minibatch-trained dictionary (from last iteration)
+        reconstructor.display_dictionary(W, cases='confirmed', if_show=True, if_save=True, foldername=foldername, filename='minibatch')
+        reconstructor.display_dictionary(W, cases='death', if_show=True, if_save=True, foldername=foldername, filename='minibatch')
+        reconstructor.display_dictionary(W, cases='recovered', if_show=True, if_save=True, foldername=foldername, filename='minibatch')
 
-    ### plot minibatch-then-online-trained dictionary (from last iteration)
-    reconstructor.display_dictionary(W1, cases='confirmed', if_show=True, if_save=True, foldername=foldername, filename='online')
-    reconstructor.display_dictionary(W1, cases='death', if_show=True, if_save=True, foldername=foldername, filename='online')
-    reconstructor.display_dictionary(W1, cases='recovered', if_show=True, if_save=True, foldername=foldername, filename='online')
+        ### plot minibatch-then-online-trained dictionary (from last iteration)
+        reconstructor.display_dictionary(W1, cases='confirmed', if_show=True, if_save=True, foldername=foldername, filename='online')
+        reconstructor.display_dictionary(W1, cases='death', if_show=True, if_save=True, foldername=foldername, filename='online')
+        reconstructor.display_dictionary(W1, cases='recovered', if_show=True, if_save=True, foldername=foldername, filename='online')
 
-    ### plot original and prediction curves
-    reconstructor.display_prediction(source, A_recons, cases='confirmed', if_show=True, if_save=True, foldername=foldername, if_errorbar=True)
-    reconstructor.display_prediction(source, A_recons, cases='death', if_show=True, if_save=True, foldername=foldername, if_errorbar=True)
-    reconstructor.display_prediction(source, A_recons, cases='recovered', if_show=True, if_save=True, foldername=foldername, if_errorbar=True)
+        ### plot original and prediction curves
+        reconstructor.display_prediction(source, A_recons, cases='confirmed', if_show=True, if_save=True, foldername=foldername, if_errorbar=True)
+        reconstructor.display_prediction(source, A_recons, cases='death', if_show=True, if_save=True, foldername=foldername, if_errorbar=True)
+        reconstructor.display_prediction(source, A_recons, cases='recovered', if_show=True, if_save=True, foldername=foldername, if_errorbar=True)
+
+    elif if_display_dict:
+        ### plot minibatch-trained dictionary (from last iteration)
+        reconstructor.display_dictionary_COVIDactnow(W, state_name='California', if_show=True, if_save=True, foldername=foldername,
+                                         filename='minibatch')
+
+        ### plot minibatch-then-online-trained dictionary (from last iteration)
+        reconstructor.display_dictionary_COVIDactnow(W1, state_name='California', if_show=True, if_save=True,
+                                                     foldername=foldername,
+                                                     filename='online')
+
+        ### plot original and prediction curves
+        filename = 'single'
+        reconstructor.display_prediction_single_COVIDactnow(path_COVIDactnow, A_recons, if_show=True, if_save=True, foldername=foldername, filename=filename, if_errorbar=True)
 
 def main():
 

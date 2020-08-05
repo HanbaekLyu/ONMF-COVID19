@@ -3,14 +3,16 @@ import numpy as np
 from sklearn.decomposition import SparseCoder
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.font_manager as font_manager
 
 DEBUG = False
 
 class time_series_tensor():
     def __init__(self,
                  path,
-                 country_list,
                  source,
+                 country_list=None,
+                 state_list=None,
                  n_components=100,  # number of dictionary elements -- rank
                  iterations=50,  # number of iterations for the ONTF algorithm
                  sub_iterations = 20,  # number of i.i.d. subsampling for each iteration of ONTF
@@ -24,6 +26,7 @@ class time_series_tensor():
                  alpha=None,
                  beta=None,
                  subsample=False,
+                 if_covidactnow = False,
                  if_onlynewcases=False,
                  if_moving_avg_data=False,
                  if_log_scale=False):
@@ -34,6 +37,7 @@ class time_series_tensor():
         '''
         self.path = path
         self.source = source
+        self.state_list = state_list
         self.country_list = country_list
         self.n_components = n_components
         self.iterations = iterations
@@ -52,10 +56,20 @@ class time_series_tensor():
         self.if_onlynewcases = if_onlynewcases
         self.if_moving_avg_data = if_moving_avg_data
         self.if_log_scale = if_log_scale
+        self.if_covidactnow = if_covidactnow
+        self.input_variable_list = ['input_hospitalBedsRequired',
+                                    'input_ICUBedsInUse',
+                                    'input_ventilatorsInUse',
+                                    'input_Deaths',
+                                    'input_Infected']
 
         # read in time series data as array
         # self.data = self.read_timeseries_as_array(self.path)
-        self.data, self.country_list = self.combine_data(self.source)
+        if self.if_covidactnow:
+            self.read_data_COVIDactnow(self.path)
+        else:
+            self.data = self.combine_data(self.source)
+
         print('data', self.data)
         print('data.shape', self.data.shape)
         self.ntf = Online_NTF(self.data, self.n_components,
@@ -114,6 +128,74 @@ class time_series_tensor():
 
         return data_new.T, country_list
 
+
+    def read_data_COVIDactnow(self, path):
+        '''
+        Read input time series data as a dictionary of pandas dataframe
+        '''
+        data = pd.read_csv(path, delimiter=',')
+        df = {}
+
+        if self.state_list == None:
+            self.state_list = sorted([i for i in set([i for i in data['stateName']])])
+
+        for state in self.state_list:
+            df1 = data.loc[data['stateName']==state].set_index('date')
+            lastUpdatedDate = df1['lastUpdatedDate'].iloc[0]
+            df1 = df1['2020-03-04':lastUpdatedDate]
+            df1['input_hospitalBedsRequired'] = df1['hospitalBedsRequired']
+            df1['input_ICUBedsInUse'] = df1['ICUBedsInUse']
+            df1['input_ventilatorsInUse'] = df1['ventilatorsInUse']
+            df1['input_Deaths'] = df1['cumulativeDeaths']
+            df1['input_Infected'] = df1['cumulativeInfected']
+            df.update({state:df1})
+
+        if self.if_onlynewcases:
+            for state in self.state_list:
+                df1 = df.get(state)
+                # df1[input_variable_list] contains 153 rows and 5 columns
+                df1['input_Infected'] = df1['input_Infected'].diff()
+                df1['input_Deaths'] = df1['input_Deaths'].diff()
+                df1 = df1.fillna(0)
+                df.update({state: df1})
+
+        if self.if_moving_avg_data:
+            for state in self.state_list:
+                df1 = df.get(state)
+                df2 = df1[self.input_variable_list]
+                df2 = df2.rolling(window=5, win_type=None).sum() / 5  ### moving average with backward window size 5
+                df2 = df2.fillna(0)
+                df1[self.input_variable_list] = df2
+                df.update({state: df1})
+
+        if self.if_log_scale:
+            for state in self.state_list:
+                df1 = df.get(state)
+                df2 = df1[self.input_variable_list]
+                df2 = np.log(df2 + 1)
+                df1[self.input_variable_list] = df2
+                df.update({state: df1})
+
+        self.df = df
+
+        ## Make numpy array of shape States x Days x variables
+        data_combined = []
+        for state in self.state_list:
+            df1 = df.get(state)
+
+            if state == self.state_list[0]:
+                data_combined = df1[self.input_variable_list].values  ## shape Days x variables
+                data_combined = np.expand_dims(data_combined, axis=0)
+                print('!!!Data_combined.shape', data_combined.shape)
+            else:
+                data_new = df1[self.input_variable_list].values  ## shape Days x variables
+                data_new = np.expand_dims(data_new, axis=0)
+                print('!!! Data_new.shape', data_new.shape)
+                data_combined = np.append(data_combined, data_new, axis=0)
+
+        self.data = data_combined
+        return df, data_combined
+
     def read_data_as_array_citywise(self, path):
         '''
         Read input time series as an array
@@ -138,11 +220,13 @@ class time_series_tensor():
     def combine_data(self, source):
         if len(source) == 1:
             for path in source:
-                data, country_list = self.read_data_as_array_countrywise(path)
+                data, self.country_list = self.read_data_as_array_countrywise(path)
                 data_combined = np.expand_dims(data, axis=2)
+
         else:
             path = source[0]
-            data, country_list = self.read_data_as_array_countrywise(path)
+            data, self.country_list = self.read_data_as_array_countrywise(path)
+
             data_combined = np.empty(shape=[data.shape[0], data.shape[1], 1])
             for path in source:
                 data_new = self.read_data_as_array_countrywise(path)[0]
@@ -158,7 +242,7 @@ class time_series_tensor():
         ### Replace all NANs in data_combined with 0
         where_are_NaNs = np.isnan(data_combined)
         data_combined[where_are_NaNs] = 0
-        return data_combined, country_list
+        return data_combined
 
     def extract_random_patches(self, batch_size=None, time_interval_initial=None):
         '''
@@ -293,6 +377,74 @@ class time_series_tensor():
         if if_show:
             plt.show()
 
+
+    def display_dictionary_COVIDactnow(self, W, state_name, if_show, if_save, foldername, filename=None, custom_code4ordering=None):
+        k = self.patch_size
+        x = self.data.shape
+        rows = np.floor(np.sqrt(self.n_components)).astype(int)
+        cols = np.ceil(np.sqrt(self.n_components)).astype(int)
+
+        fig, axs = plt.subplots(nrows=rows, ncols=cols, figsize=(6, 6),
+                                subplot_kw={'xticks': [], 'yticks': []})
+
+        print('W.shape', W.shape)
+
+        code = self.code
+        # print('code', code)
+        importance = np.sum(code, axis=1) / sum(sum(code))
+
+        if self.if_log_scale:
+            W = np.exp(W) - 1
+
+        if custom_code4ordering is None:
+            idx = np.argsort(importance)
+            idx = np.flip(idx)
+        else:
+            custom_importance = np.sum(custom_code4ordering, axis=1) / sum(sum(custom_code4ordering))
+            idx = np.argsort(custom_importance)
+            idx = np.flip(idx)
+
+        for axs, i in zip(axs.flat, range(self.n_components)):
+            dict = W[:, idx[i]].reshape(x[0], k, x[2])
+            # print('x.shape', x)
+            j = self.state_list.index(state_name)
+
+            for c in np.arange(dict.shape[2]):
+                variable_name = self.input_variable_list[c]
+                variable_name = variable_name.replace('input_', '')
+
+                if variable_name == 'Infected':
+                    marker = '*'
+                elif variable_name == 'Deaths':
+                    marker = 'x'
+                elif variable_name == 'hospitalBedsRequired':
+                    marker = '^'
+                elif variable_name == 'ICUBedsInUse':
+                    marker = 'o'
+                elif variable_name == 'ventilatorsInUse':
+                    marker = '|'
+
+                axs.plot(np.arange(k), dict[j, :, c], marker=marker, label=variable_name)
+
+            axs.set_xlabel('%1.2f' % importance[idx[i]], fontsize=13)  # get the largest first
+            axs.xaxis.set_label_coords(0.5, -0.05)  # adjust location of importance appearing beneath patches
+
+        handles, labels = axs.get_legend_handles_labels()
+        fig.legend(handles, labels, loc='center right') ## bbox_to_anchor=(0,0)
+        plt.suptitle(str(state_name) + '-Temporal Dictionary of size %d'% k, fontsize=16)
+        # plt.subplots_adjust(left=0.01, right=0.55, bottom=0.05, top=0.99, wspace=0.1, hspace=0.4)  # for 24 atoms
+
+        plt.subplots_adjust(left=0.01, right=0.62, bottom=0.1, top=0.8, wspace=0.1, hspace=0.4)  # for 12 atoms
+        # plt.tight_layout()
+
+        if if_save:
+            if filename is None:
+                plt.savefig('Time_series_dictionary/' + str(foldername) + '/Dict-' + str(state_name) + '.png')
+            else:
+                plt.savefig('Time_series_dictionary/' + str(foldername) + '/Dict-' + str(state_name) +'_' +str(filename) +'.png')
+        if if_show:
+            plt.show()
+
     def display_dictionary_single(self, W, if_show, if_save, foldername, filename, custom_code4ordering=None):
         k = self.patch_size
         x = self.data.shape
@@ -348,6 +500,75 @@ class time_series_tensor():
 
         if if_save:
             plt.savefig('Time_series_dictionary/' + str(foldername) +'/Dict-' + str(self.country_list[0])+ '_' + str(filename) + '.png')
+        if if_show:
+            plt.show()
+
+    def display_prediction_single_COVIDactnow(self, path, prediction, if_show, if_save, foldername, filename, if_errorbar=True):
+        A = self.read_data_COVIDactnow(path=path)[1]  ### ndarray with shape states x days x variables
+        k = self.patch_size
+        A_recons = prediction
+        A_predict = A_recons.copy()
+
+        if if_errorbar:
+            # print('!!!', A_predict.shape)  # trials x states x days x variables
+            A_predict = np.sum(A_recons, axis=0) / A_recons.shape[0]  ### axis-0 : trials
+            A_std = np.std(A_recons, axis=0)
+            print('!!! A_std', A_std)
+
+        if self.if_log_scale:
+            A = np.exp(A) - 1
+            A_predict = np.exp(A_predict) - 1
+
+        ### Make gridspec
+        fig1 = plt.figure(figsize=(10, 10), constrained_layout=False)
+        gs1 = fig1.add_gridspec(nrows=A_predict.shape[2], ncols=A_predict.shape[0], wspace=0.2, hspace=0.2)
+
+        font = font_manager.FontProperties(family="Times New Roman", size=11)
+
+        for i in range(A_predict.shape[0]):
+            for c in range(A_predict.shape[2]):
+
+                ax = fig1.add_subplot(gs1[c, i])
+
+                variable_name = self.input_variable_list[c]
+                variable_name = variable_name.replace('input_', '')
+
+                ### get days xticks
+                x_data = pd.date_range('2020-03-04', periods=A.shape[1], freq='D')
+                x_data_recons = pd.date_range('2020-03-04', periods=A_predict.shape[1] - self.patch_size, freq='D')
+                x_data_recons += pd.DateOffset(self.patch_size)
+
+                ### plot axs
+                ax.plot(x_data, A[0, :, c], 'b-', marker='o', markevery=5, label='Original-' + str(variable_name))
+
+                if not if_errorbar:
+                    ax.plot(x_data_recons, A_predict[i, self.patch_size:A_predict.shape[1], c],
+                             'r-', marker='x', markevery=5, label='Prediction-' + str(variable_name))
+                else:
+                    ax.errorbar(x_data_recons, A_predict[i, self.patch_size:A_predict.shape[1], c], yerr= A_std[i, self.patch_size:A_predict.shape[1], c],
+                             fmt='r-', label='Prediction-' + str(variable_name), errorevery=2)
+
+                ax.set_ylim(0, np.maximum(np.max(A[i, :, c]), np.max(A_predict[i, :, c] + A_std[i,:,c]))*1.1)
+
+                if c == 0:
+                    ax.set_title(str(self.state_list[i]), font=font, size=15)
+
+                ax.yaxis.set_label_position("left")
+                # ax.yaxis.set_label_coords(0, 2)
+                # ax.set_ylabel(str(list[j]), rotation=90)
+                ax.set_ylabel('population', fontsize=10)  # get the largest first
+                ax.yaxis.set_label_position("left")
+                ax.legend(prop=font)
+
+        fig1.autofmt_xdate()
+        #fig.suptitle('Plot of original and 1-step prediction -- ' + 'COVID-19 : '+ str(self.country_list[0]) +
+        #             "\n seg. length = %i, # temp. dict. atoms = %i, learning exponent = %1.3f" % (self.patch_size, self.n_components, self.beta),
+        #             fontsize=12, y=0.96)
+        # plt.tight_layout()
+        plt.subplots_adjust(left=0.1, right=0.9, bottom=0.1, top=0.95, wspace=0.08, hspace=0.23)
+
+        if if_save:
+            plt.savefig('Time_series_dictionary/' + str(foldername) +'/Plot-'+str(self.state_list[0])+'-'+str(filename)+'.png')
         if if_show:
             plt.show()
 
@@ -516,16 +737,21 @@ class time_series_tensor():
                 # for "iterations" iterations
                 W, At, Bt, H = self.ntf.train_dict_single()
                 code += H
-            # print('Current iteration %i out of %i' % (t, self.iterations))
+            print('Current minibatch training iteration %i out of %i' % (t, self.iterations))
         self.W = W
         self.code = code
         # print('code_right_after_training', self.code)
+        if self.if_covidactnow:
+            list = self.state_list
+        else:
+            list = self.country_list
+
         print('dict_shape:', self.W.shape)
         print('code_shape:', self.code.shape)
-        np.save('Time_series_dictionary/' + str(foldername) +'/dict_learned_' + str(mode) +'_'+ 'pretraining' + '_'+ str(self.country_list[0]), self.W)
-        np.save('Time_series_dictionary/' + str(foldername) +'/code_learned_' + str(mode) +'_'+ 'pretraining' + '_'+ str(self.country_list[0]), self.code)
-        np.save('Time_series_dictionary/' + str(foldername) +'/At_' + str(mode) + '_' + 'pretraining' + '_' + str(self.country_list[0]), At)
-        np.save('Time_series_dictionary/' + str(foldername) +'/Bt_' + str(mode) + '_' + 'pretraining' + '_' + str(self.country_list[0]), Bt)
+        np.save('Time_series_dictionary/' + str(foldername) +'/dict_learned_' + str(mode) +'_'+ 'pretraining' + '_'+ str(list[0]), self.W)
+        np.save('Time_series_dictionary/' + str(foldername) +'/code_learned_' + str(mode) +'_'+ 'pretraining' + '_'+ str(list[0]), self.code)
+        np.save('Time_series_dictionary/' + str(foldername) +'/At_' + str(mode) + '_' + 'pretraining' + '_' + str(list[0]), At)
+        np.save('Time_series_dictionary/' + str(foldername) +'/Bt_' + str(mode) + '_' + 'pretraining' + '_' + str(list[0]), Bt)
         return W, At, Bt, self.code
 
     def online_learning_and_prediction(self,
@@ -650,11 +876,16 @@ class time_series_tensor():
         # print(W)
         # print('dict_shape:', self.W.shape)
         # print('code_shape:', self.code.shape)
+        if self.if_covidactnow:
+            list = self.state_list
+        else:
+            list = self.country_list
+
         if if_save:
-            np.save('Time_series_dictionary/' + str(foldername) +'/dict_learned_tensor' +'_'+ str(self.country_list[0]) + '_' +'afteronline' + str(self.beta), self.W)
-            np.save('Time_series_dictionary/' + str(foldername) +'/code_learned_tensor' +'_'+ str(self.country_list[0]) + '_' +'afteronline' + str(self.beta), self.code)
-            np.save('Time_series_dictionary/' + str(foldername) +'/At' + str(self.country_list[0]) + '_' +'afteronline' + str(self.beta), At)
-            np.save('Time_series_dictionary/' + str(foldername) +'/Bt' + str(self.country_list[0]) + '_' +'afteronline' + str(self.beta), Bt)
+            np.save('Time_series_dictionary/' + str(foldername) +'/dict_learned_tensor' +'_'+ str(list[0]) + '_' +'afteronline' + str(self.beta), self.W)
+            np.save('Time_series_dictionary/' + str(foldername) +'/code_learned_tensor' +'_'+ str(list[0]) + '_' +'afteronline' + str(self.beta), self.code)
+            np.save('Time_series_dictionary/' + str(foldername) +'/At' + str(list[0]) + '_' +'afteronline' + str(self.beta), At)
+            np.save('Time_series_dictionary/' + str(foldername) +'/Bt' + str(list[0]) + '_' +'afteronline' + str(self.beta), Bt)
             np.save('Time_series_dictionary/' + str(foldername) +'/recons', A_recons)
         return A_recons, error, self.W, At, Bt, self.code
 
