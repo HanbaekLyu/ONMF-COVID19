@@ -709,12 +709,33 @@ class ONMF_timeseries_reconstructor():
         if if_show:
             plt.show()
 
-    def display_prediction_single_Hospital(self, prediction, if_show, if_save, foldername, filename, if_errorbar=True):
+    def display_prediction_evaluation(self, prediction, if_show, if_save, foldername, filename, if_errorbar=True,
+                                      if_evaluation=False):
         A = self.data
         k = self.patch_size
         A_recons = prediction
         print('!!!!!!!A_recons.shape', A_recons.shape)
         A_predict = A_recons.copy()
+
+        if if_evaluation:
+            A_predict1 = A_recons.copy()
+            ### A_recons.shape = (# trials) x (# days) x (# states) x (Future Extrapolation Length) x (# variables)
+            A_recons1 = np.zeros(shape=(A_predict1.shape[0], A.shape[1] + A_predict1.shape[3], A.shape[0], A.shape[2]))
+            A_recons1 = A_predict1[:, :, :, -1, :]
+
+            # for i in np.arange(0, A_predict1.shape[2]):
+            #     A_recons1[:,i + A_predict1.shape[3],:,:] = A_predict1[:,i,:, -1,:]
+            a = np.zeros(shape=(A_predict1.shape[0], A_predict1.shape[3], A.shape[0], A.shape[2]))
+            A_recons1 = np.append(a, A_recons1, axis=1)
+
+            A_recons1 = np.swapaxes(A_recons1, axis1=1, axis2=2)
+            for trial in np.arange(0, A_predict1.shape[0]):
+                for j in np.arange(0, A_predict1.shape[3]):
+                    A_recons1[trial, :, j, :] = A[:, j, :]
+
+            A_recons = A_recons1
+            A_predict = A_recons.copy()
+            print('!!!!!!!! A_recons', A_recons)
 
         if self.if_log_scale:
             A = np.exp(A) - 1
@@ -727,7 +748,7 @@ class ONMF_timeseries_reconstructor():
             print('!!! A_std', A_std)
 
         ### Make gridspec
-        fig1 = plt.figure(figsize=(10, 10), constrained_layout=False)
+        fig1 = plt.figure(figsize=(15, 10), constrained_layout=False)
         gs1 = fig1.add_gridspec(nrows=A_predict.shape[2], ncols=A_predict.shape[0], wspace=0.2, hspace=0.2)
 
         # font = font_manager.FontProperties(family="Times New Roman", size=11)
@@ -828,7 +849,7 @@ class ONMF_timeseries_reconstructor():
 
         fig.suptitle('Plot of original and 1-step prediction -- ' + 'COVID-19 : ' + str(self.country_list[0]) +
                      "\n seg. length = %i, # temp. dict. atoms = %i, learning exponent = %1.3f" % (
-                     self.patch_size, self.n_components, self.beta),
+                         self.patch_size, self.n_components, self.beta),
                      fontsize=12, y=0.96)
         plt.tight_layout(rect=[0, 0.03, 1, 0.9])
         # plt.subplots_adjust(left=0.2, right=0.9, bottom=0.1, top=0.85, wspace=0.08, hspace=0.23)
@@ -899,7 +920,7 @@ class ONMF_timeseries_reconstructor():
             fig.autofmt_xdate()
             fig.suptitle('Plot of original and 1-step prediction -- ' + 'COVID-19:' + cases +
                          "\n segment length = %i, # temporal dictionary atoms = %i" % (
-                         self.patch_size, self.n_components),
+                             self.patch_size, self.n_components),
                          fontsize=12, y=1)
             plt.tight_layout(rect=[0, 0.03, 1, 0.9])
             # plt.subplots_adjust(left=0.2, right=0.9, bottom=0.1, top=0.85, wspace=0.08, hspace=0.23)
@@ -988,25 +1009,25 @@ class ONMF_timeseries_reconstructor():
                 list[0]), Bt)
         return W, At, Bt, code
 
-    def ONMF_timeseris_predictor(self,
-                                 mode,
-                                 foldername,
-                                 data=None,
-                                 ini_dict=None,
-                                 ini_A=None,
-                                 ini_B=None,
-                                 beta=1,
-                                 a1=1,  # regularizer for the code in partial fitting
-                                 a2=1,  # regularizer for the code in recursive prediction
-                                 future_extraploation_length=0,
-                                 if_learn_online=True,
-                                 if_save=True,
-                                 # if_recons = True,  ### Reconstruct observed data using learned dictionary
-                                 minibatch_training_initialization=False,
-                                 minibatch_alpha=1,
-                                 minibatch_beta=1,
-                                 print_iter=False,
-                                 num_trials=1):
+    def ONMF_predictor(self,
+                       mode,
+                       foldername,
+                       data=None,
+                       ini_dict=None,
+                       ini_A=None,
+                       ini_B=None,
+                       beta=1,
+                       a1=1,  # regularizer for the code in partial fitting
+                       a2=1,  # regularizer for the code in recursive prediction
+                       future_extraploation_length=0,
+                       if_learn_online=True,
+                       if_save=True,
+                       # if_recons = True,  ### Reconstruct observed data using learned dictionary
+                       minibatch_training_initialization=False,
+                       minibatch_alpha=1,
+                       minibatch_beta=1,
+                       print_iter=False,
+                       num_trials=1):
         print('online learning and predicting from patches along mode %i...' % mode)
         '''
         Trains dictionary along a continuously sliding window over the data stream 
@@ -1104,7 +1125,8 @@ class ONMF_timeseries_reconstructor():
                     A_recons = np.append(A_recons, patch_recons, axis=1)
                     # print('!!!!!!!!!!!! A_recons.shape', A_recons.shape)
             if print_iter:
-                print('Current (trial, day) for ONMF_predictor (%i, %i) out of (%i, %i)' % (trial, t, num_trials, A.shape[1]-1))
+                print('Current (trial, day) for ONMF_predictor (%i, %i) out of (%i, %i)' % (
+                trial, t, num_trials, A.shape[1] - 1))
             # forward recursive prediction begins
             for t in np.arange(A.shape[1], A.shape[1] + future_extraploation_length):
                 patch = A_recons[:, t - k + L:t, :]
@@ -1121,14 +1143,14 @@ class ONMF_timeseries_reconstructor():
 
             list_full_predictions.append(A_recons.copy())
 
-        A_full_predictions_trials = np.asarray(list_full_predictions)  ## shape = (# trials) x (# states) x (# days + L) x (# varibles)
-
-        if self.data_source != 'JHU':
-            list = self.state_list
-        else:
-            list = self.country_list
+        A_full_predictions_trials = np.asarray(
+            list_full_predictions)  ## shape = (# trials) x (# states) x (# days + L) x (# varibles)
 
         if if_save:
+            if self.data_source != 'JHU':
+                list = self.state_list
+            else:
+                list = self.country_list
             np.save('Time_series_dictionary/' + str(foldername) + '/dict_learned_tensor' + '_' + str(
                 list[0]) + '_' + 'afteronline' + str(self.beta), self.W)
             np.save('Time_series_dictionary/' + str(foldername) + '/code_learned_tensor' + '_' + str(
@@ -1140,21 +1162,21 @@ class ONMF_timeseries_reconstructor():
             np.save('Time_series_dictionary/' + str(foldername) + '/recons', A_recons)
         return A_full_predictions_trials, self.W, At, Bt, self.code
 
-    def ONMF_timeseris_predictor_historic(self,
-                                          mode,
-                                          foldername,
-                                          ini_dict=None,
-                                          ini_A=None,
-                                          ini_B=None,
-                                          beta=1,
-                                          a1=1,  # regularizer for the code in partial fitting
-                                          a2=1,  # regularizer for the code in recursive prediction
-                                          future_extraploation_length=0,
-                                          if_save=True,
-                                          minibatch_training_initialization=False,
-                                          minibatch_alpha=1,
-                                          minibatch_beta=1,
-                                          num_trials=1):  # take a number of trials to generate empirical confidence interval
+    def ONMF_predictor_historic(self,
+                                mode,
+                                foldername,
+                                ini_dict=None,
+                                ini_A=None,
+                                ini_B=None,
+                                beta=1,
+                                a1=1,  # regularizer for the code in partial fitting
+                                a2=1,  # regularizer for the code in recursive prediction
+                                future_extraploation_length=0,
+                                if_save=True,
+                                minibatch_training_initialization=False,
+                                minibatch_alpha=1,
+                                minibatch_beta=1,
+                                num_trials=1):  # take a number of trials to generate empirical confidence interval
 
         print('Running ONMF_timeseries_predictor_historic along mode %i...' % mode)
         '''
@@ -1181,43 +1203,68 @@ class ONMF_timeseries_reconstructor():
         for trial in np.arange(num_trials):
 
             ### A_total_prediction.shape = (# days) x (# states) x (FEL) x (# variables)
-            A_total_prediction = np.zeros(shape=(k + 1, A.shape[0], FEL, A.shape[2]))
+            A_total_prediction = []
             ### fill in predictions for the first k days with the raw data
             for i in np.arange(k + 1):
-                A_total_prediction[i, :, :, :] = A[:, i:i + FEL, :]
+                A_total_prediction.append(A[:, i:i + FEL, :])
 
             for t in np.arange(k + 1, A.shape[1]):
                 ### Set self.data to the truncated one during [1,t]
                 A1 = A[:, :t, :]
-                A_recons, W, At, Bt, code = self.ONMF_timeseris_predictor(mode,
-                                                                         foldername,
-                                                                         data=A1,
-                                                                         ini_dict=ini_dict,
-                                                                         ini_A=ini_A,
-                                                                         ini_B=ini_B,
-                                                                         beta=beta,
-                                                                         a1=a1,
-                                                                         # regularizer for the code in partial fitting
-                                                                         a2=a2,
-                                                                         # regularizer for the code in recursive prediction
-                                                                         future_extraploation_length=future_extraploation_length,
-                                                                         if_save=True,
-                                                                         minibatch_training_initialization=minibatch_training_initialization,
-                                                                         minibatch_alpha=minibatch_alpha,
-                                                                         minibatch_beta=minibatch_beta,
-                                                                         print_iter=False)
-
+                A_recons, W, At, Bt, code = self.ONMF_predictor(mode,
+                                                                foldername,
+                                                                data=A1,
+                                                                ini_dict=ini_dict,
+                                                                ini_A=ini_A,
+                                                                ini_B=ini_B,
+                                                                beta=beta,
+                                                                a1=a1,
+                                                                # regularizer for the code in partial fitting
+                                                                a2=a2,
+                                                                # regularizer for the code in recursive prediction
+                                                                future_extraploation_length=future_extraploation_length,
+                                                                if_save=True,
+                                                                minibatch_training_initialization=minibatch_training_initialization,
+                                                                minibatch_alpha=minibatch_alpha,
+                                                                minibatch_beta=minibatch_beta,
+                                                                print_iter=False,
+                                                                num_trials=1)
+                A_recons = A_recons[0, :, :, :]
+                # print('!!!! A_recons.shape', A_recons.shape)
                 ### A_recons.shape = (# states, t+FEL, # variables)
-                A_total_prediction = np.append(A_total_prediction, A_recons[:, :, -FEL, :])
+                # print('!!!!! A_recons[:, -FEL:, :].shape', A_recons[:, -FEL:, :].shape)
+                A_total_prediction.append(A_recons[:, -FEL:, :])
+                ### A_recons.shape = (# states, t+FEL, # variables)
+                print('Current (trial, day) for ONMF_predictor_historic (%i, %i) out of (%i, %i)' % (
+                trial, t - k, num_trials, A.shape[1] - k - 1))
 
-                print('Current (trial, day) for ONMF_predictor_historic (%i, %i) out of (%i, %i)' % (trial, t, num_trials, A.shape[1] - k))
-
+            A_total_prediction = np.asarray(A_total_prediction)
             list_full_predictions.append(A_total_prediction)
 
         A_full_predictions_trials = np.asarray(list_full_predictions)
-        print('!!! A_full_predictions_trials.shape', A_full_predictions_trials)
+        print('!!! A_full_predictions_trials.shape', A_full_predictions_trials.shape)
 
-        return A_full_predictions_trials
+        if if_save:
+
+            if self.data_source != 'JHU':
+                list = self.state_list
+            else:
+                list = self.country_list
+
+            np.save('Time_series_dictionary/' + str(foldername) + '/dict_learned_tensor' + '_' + str(
+                list[0]) + '_' + 'afteronline' + str(self.beta), self.W)
+            np.save('Time_series_dictionary/' + str(foldername) + '/code_learned_tensor' + '_' + str(
+                list[0]) + '_' + 'afteronline' + str(self.beta), self.code)
+            np.save('Time_series_dictionary/' + str(foldername) + '/At' + str(list[0]) + '_' + 'afteronline' + str(
+                self.beta), At)
+            np.save('Time_series_dictionary/' + str(foldername) + '/Bt' + str(list[0]) + '_' + 'afteronline' + str(
+                self.beta), Bt)
+            np.save('Time_series_dictionary/' + str(foldername) + '/Full_prediction_trials_' + 'num_trials_' + str(
+                num_trials) + '.pdf', A_full_predictions_trials)
+
+        print('!!!! code', code.shape)
+
+        return A_full_predictions_trials, W, code
 
     def predict_joint_single(self, data, a1):
         k = self.patch_size
