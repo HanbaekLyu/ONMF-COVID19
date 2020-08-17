@@ -799,7 +799,7 @@ class ONMF_timeseries_reconstructor():
 
         if if_save:
             plt.savefig('Time_series_dictionary/' + str(foldername) + '/Plot-' + str(self.state_list[0]) + '-' + str(
-                filename) + '.png')
+                filename) + '.pdf')
         if if_show:
             plt.show()
 
@@ -1260,7 +1260,7 @@ class ONMF_timeseries_reconstructor():
             np.save('Time_series_dictionary/' + str(foldername) + '/Bt' + str(list[0]) + '_' + 'afteronline' + str(
                 self.beta), Bt)
             np.save('Time_series_dictionary/' + str(foldername) + '/Full_prediction_trials_' + 'num_trials_' + str(
-                num_trials) + '.pdf', A_full_predictions_trials)
+                num_trials), A_full_predictions_trials)
 
         print('!!!! code', code.shape)
 
