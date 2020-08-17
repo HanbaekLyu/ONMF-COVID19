@@ -3,21 +3,28 @@ import numpy as np
 from sklearn.decomposition import SparseCoder
 import pandas as pd
 import matplotlib.pyplot as plt
+
+plt.rcParams['font.family'] = 'serif'
+plt.rcParams['font.serif'] = ['Times New Roman'] + plt.rcParams['font.serif']
 import matplotlib.font_manager as font_manager
+import covid_dataprocess
+import itertools
 
 DEBUG = False
 
-class time_series_tensor():
+
+class ONMF_timeseries_reconstructor():
     def __init__(self,
                  path,
                  source,
+                 data_source,
                  country_list=None,
                  state_list=None,
                  n_components=100,  # number of dictionary elements -- rank
-                 iterations=50,  # number of iterations for the ONTF algorithm
-                 sub_iterations = 20,  # number of i.i.d. subsampling for each iteration of ONTF
-                 batch_size=20,   # number of patches used in i.i.d. subsampling
-                 num_patches_perbatch = 1000,   # number of patches that ONTF algorithm learns from at each iteration
+                 ONMF_iterations=50,  # number of iterations for the ONMF algorithm
+                 ONMF_sub_iterations=20,  # number of i.i.d. subsampling for each iteration of ONTF
+                 ONMF_batch_size=20,  # number of patches used in i.i.d. subsampling
+                 num_patches_perbatch=1000,  # number of patches that ONTF algorithm learns from at each iteration
                  patch_size=7,
                  patches_file='',
                  learn_joint_dict=False,
@@ -26,7 +33,7 @@ class time_series_tensor():
                  alpha=None,
                  beta=None,
                  subsample=False,
-                 if_covidactnow = False,
+                 if_covidactnow=False,
                  if_onlynewcases=False,
                  if_moving_avg_data=False,
                  if_log_scale=False):
@@ -37,51 +44,153 @@ class time_series_tensor():
         '''
         self.path = path
         self.source = source
+        self.data_source = data_source
         self.state_list = state_list
         self.country_list = country_list
         self.n_components = n_components
-        self.iterations = iterations
-        self.sub_iterations = sub_iterations
+        self.ONMF_iterations = ONMF_iterations
+        self.ONMF_sub_iterations = ONMF_sub_iterations
         self.num_patches_perbatch = num_patches_perbatch
-        self.batch_size = batch_size
+        self.ONMF_batch_size = ONMF_batch_size
         self.patch_size = patch_size
         self.patches_file = patches_file
         self.learn_joint_dict = learn_joint_dict
         self.prediction_length = prediction_length
         self.code = np.zeros(shape=(n_components, num_patches_perbatch))
-        self.learnevery=learnevery
+        self.learnevery = learnevery
         self.alpha = alpha
         self.beta = beta
         self.subsample = subsample
         self.if_onlynewcases = if_onlynewcases
         self.if_moving_avg_data = if_moving_avg_data
         self.if_log_scale = if_log_scale
-        self.if_covidactnow = if_covidactnow
-        self.input_variable_list = ['input_hospitalBedsRequired',
-                                    'input_ICUBedsInUse',
-                                    'input_ventilatorsInUse',
-                                    'input_Deaths',
-                                    'input_Infected']
+        self.input_variable_list = []
 
-        # read in time series data as array
-        # self.data = self.read_timeseries_as_array(self.path)
-        if self.if_covidactnow:
-            self.read_data_COVIDactnow(self.path)
-        else:
+        input_variable_list = []
+
+        if data_source == 'COVID_ACT_NOW':
+            print('LOADING.. COVID_ACT_NOW')
+            self.input_variable_list = ['input_hospitalBedsRequired',
+                                        'input_ICUBedsInUse',
+                                        'input_ventilatorsInUse',
+                                        'input_Deaths',
+                                        'input_Infected']
+            self.df = covid_dataprocess.read_data_COVIDactnow_NYT()
+            self.truncate_NAN_DataFrame()
+            self.moving_avg_log_scale()
+            self.extract_ndarray_from_DataFrame()
+
+
+        elif data_source == 'COVID_TRACKING_PROJECT':
+            print('LOADING.. COVID_TRACKING_PROJECT')
+            self.input_variable_list = ['input_hospitalized_Currently',
+                                        'input_inICU_Currently',
+                                        'input_daily_test_positive_rate',
+                                        'input_daily_cases',
+                                        'input_daily_deaths',
+                                        'input_daily_cases_pct_change']
+
+            self.df = covid_dataprocess.read_data_COVIDtrackingProject()
+            self.truncate_NAN_DataFrame()
+            self.moving_avg_log_scale()
+            self.extract_ndarray_from_DataFrame()
+            print('!!! df', self.df.get('Florida'))
+
+
+        else:  ### JHU data
+            print('LOADING.. JHU Data')
             self.data = self.combine_data(self.source)
 
         print('data', self.data)
         print('data.shape', self.data.shape)
         self.ntf = Online_NTF(self.data, self.n_components,
-                              iterations=self.sub_iterations,
+                              iterations=self.ONMF_sub_iterations,
                               learn_joint_dict=True,
                               mode=3,
                               ini_dict=None,
                               ini_A=None,
                               ini_B=None,
-                              batch_size=self.batch_size)
+                              batch_size=self.ONMF_batch_size)
 
         self.W = np.zeros(shape=(self.data.shape[0] * self.data.shape[2] * patch_size, n_components))
+
+    def moving_avg_log_scale(self):
+        df = self.df
+        if self.if_moving_avg_data:
+            for state in self.state_list:
+                df1 = df.get(state)
+                df2 = df1[self.input_variable_list]
+                df2 = df2.rolling(window=5, win_type=None).sum() / 5  ### moving average with backward window size 5
+                df2 = df2.fillna(0)
+                df1[self.input_variable_list] = df2
+                df.update({state: df1})
+
+        if self.if_log_scale:
+            for state in self.state_list:
+                df1 = df.get(state)
+                df2 = df1[self.input_variable_list]
+                df2 = np.log(df2 + 1)
+                df1[self.input_variable_list] = df2
+                df.update({state: df1})
+
+        self.df = df
+
+    def truncate_NAN_DataFrame(self):
+        df = self.df
+        ### Take the maximal sub-dataframe that does not contain NAN
+        ### If some state has all NANs for some variable, that variable is dropped from input_list_variable
+        start_dates = []
+        end_dates = []
+
+        input_variable_list_noNAN = self.input_variable_list.copy()
+        for column in input_variable_list_noNAN:
+            for state in self.state_list:
+                df1 = df.get(state)
+                if df1[column].isnull().all():
+                    input_variable_list_noNAN.remove(column)
+        self.input_variable_list = input_variable_list_noNAN
+        print('!!! New input_variable_list', self.input_variable_list)
+
+        for state in self.state_list:
+            df1 = df.get(state)
+            for column in self.input_variable_list:
+                l_min = df1[column][df1[column].notnull()].index[0]
+                l_max = df1[column][df1[column].notnull()].index[-1]
+                start_dates.append(l_min)
+                end_dates.append(l_max)
+
+        max_min_date = max(start_dates)
+        min_max_date = min(end_dates)
+
+        for state in self.state_list:
+            df1 = df.get(state)
+            df1 = df1[max_min_date:min_max_date]
+            print('!!! If any value is NAN:', df1.isnull())
+            df.update({state: df1})
+        self.df = df
+
+    def extract_ndarray_from_DataFrame(self):
+        ## Make numpy array of shape States x Days x variables
+        data_combined = []
+        df = self.df
+        if self.state_list == None:
+            self.state_list = sorted([i for i in set(df.keys())])
+
+        for state in self.state_list:
+            df1 = df.get(state)
+
+            if state == self.state_list[0]:
+                data_combined = df1[self.input_variable_list].values  ## shape Days x variables
+                data_combined = np.expand_dims(data_combined, axis=0)
+                print('!!!Data_combined.shape', data_combined.shape)
+            else:
+                data_new = df1[self.input_variable_list].values  ## shape Days x variables
+                data_new = np.expand_dims(data_new, axis=0)
+                print('!!! Data_new.shape', data_new.shape)
+                data_combined = np.append(data_combined, data_new, axis=0)
+
+        data_combined = np.nan_to_num(data_combined, copy=True, nan=0, posinf=1, neginf=0)
+        self.data = data_combined
 
     def read_data_as_array_countrywise(self, path):
         '''
@@ -120,35 +229,66 @@ class time_series_tensor():
 
         if self.if_moving_avg_data:
             for i in np.arange(5, data_new.T.shape[1]):
-                data_new.T[:, i] = (data_new.T[:,i] + data_new.T[:,i-1] + data_new.T[:,i-2]+data_new.T[:,i-3]+data_new.T[:,i-4])/5
+                data_new.T[:, i] = (data_new.T[:, i] + data_new.T[:, i - 1] + data_new.T[:, i - 2] + data_new.T[:,
+                                                                                                     i - 3] + data_new.T[
+                                                                                                              :,
+                                                                                                              i - 4]) / 5
                 # A_recons[:, i] = (A_recons[:, i] + A_recons[:, i-1]) / 2
 
         if self.if_log_scale:
-                data_new = np.log(data_new+1)
+            data_new = np.log(data_new + 1)
 
         return data_new.T, country_list
 
-
-    def read_data_COVIDactnow(self, path):
+    def read_data_COVIDactnow(self, path, use_NYT_cases=False):
         '''
         Read input time series data as a dictionary of pandas dataframe
+        COVIDACTNOW is a SYNTHETIC data!!!
+        That's why the cases and deaths are off from the real data, expecially for the NO_INTERVENTION case
         '''
         data = pd.read_csv(path, delimiter=',')
         df = {}
+        data_NYT = pd.read_csv("Data/NYT_us-states.csv", delimiter=',')
 
         if self.state_list == None:
             self.state_list = sorted([i for i in set([i for i in data['stateName']])])
 
+        ### Find earliest starting date of the data
+        start_dates = []
         for state in self.state_list:
-            df1 = data.loc[data['stateName']==state].set_index('date')
+            df1 = data.loc[data['stateName'] == state]
+            start_dates.append(min(df1['date']))
+        max_min_date = max(start_dates)
+        # print('!!! min_dates', max_min_date)
+
+        for state in self.state_list:
+            df1 = data.loc[data['stateName'] == state].set_index('date')
             lastUpdatedDate = df1['lastUpdatedDate'].iloc[0]
-            df1 = df1['2020-03-04':lastUpdatedDate]
+            df1 = df1[max_min_date:lastUpdatedDate]
             df1['input_hospitalBedsRequired'] = df1['hospitalBedsRequired']
             df1['input_ICUBedsInUse'] = df1['ICUBedsInUse']
             df1['input_ventilatorsInUse'] = df1['ventilatorsInUse']
-            df1['input_Deaths'] = df1['cumulativeDeaths']
-            df1['input_Infected'] = df1['cumulativeInfected']
-            df.update({state:df1})
+            if not use_NYT_cases:
+                df1['input_Deaths'] = df1['cumulativeDeaths']
+                df1['input_Infected'] = df1['cumulativeInfected']
+            else:
+                df_NYT1 = data_NYT.loc[data_NYT['state'] == state].set_index('date')
+                df1['input_Deaths'] = df_NYT1['deaths']
+                print('!!! df_NYT1', df_NYT1['deaths'])
+                df1['input_Infected'] = df_NYT1['cases']
+                print('!!! df_NYT1_cases', df_NYT1['cases'])
+
+            ### Take the maximal sub-dataframe that does not contain NAN
+            max_index = []
+            for column in self.input_variable_list:
+                l = df1[column][df1[column].notnull()].index[-1]
+                max_index.append(l)
+            max_index = min(max_index)
+            print('!!! max_index', max_index)
+            df1 = df1[:max_index]
+
+            print('!!! If any value is NAN:', df1.isnull())
+            df.update({state: df1})
 
         if self.if_onlynewcases:
             for state in self.state_list:
@@ -158,6 +298,77 @@ class time_series_tensor():
                 df1['input_Deaths'] = df1['input_Deaths'].diff()
                 df1 = df1.fillna(0)
                 df.update({state: df1})
+
+        if self.if_moving_avg_data:
+            for state in self.state_list:
+                df1 = df.get(state)
+                df2 = df1[self.input_variable_list]
+                df2 = df2.rolling(window=5, win_type=None).sum() / 5  ### moving average with backward window size 5
+                df2 = df2.fillna(0)
+                df1[self.input_variable_list] = df2
+                df.update({state: df1})
+
+        if self.if_log_scale:
+            for state in self.state_list:
+                df1 = df.get(state)
+                df2 = df1[self.input_variable_list]
+                df2 = np.log(df2 + 1)
+                df1[self.input_variable_list] = df2
+                df.update({state: df1})
+
+        self.df = df
+
+        ## Make numpy array of shape States x Days x variables
+        data_combined = []
+        for state in self.state_list:
+            df1 = df.get(state)
+
+            if state == self.state_list[0]:
+                data_combined = df1[self.input_variable_list].values  ## shape Days x variables
+                data_combined = np.expand_dims(data_combined, axis=0)
+                print('!!!Data_combined.shape', data_combined.shape)
+            else:
+                data_new = df1[self.input_variable_list].values  ## shape Days x variables
+                data_new = np.expand_dims(data_new, axis=0)
+                print('!!! Data_new.shape', data_new.shape)
+                data_combined = np.append(data_combined, data_new, axis=0)
+
+        self.data = data_combined
+        return df, data_combined
+
+    def read_data_COVIDtrackingProject(self, path):
+        '''
+        Read input time series data as a dictionary of pandas dataframe
+        '''
+        data = pd.read_csv(path, delimiter=',').sort_values(by="date")
+        ### Convert the format of dates from string to datetime
+        data['date'] = pd.to_datetime(data['date'], format='%Y%m%d', utc=False)
+
+        df = {}
+
+        if self.state_list == None:
+            self.state_list = sorted([i for i in set([i for i in data['state']])])
+
+        ### Find earliest starting date of the data
+        start_dates = []
+        for state in self.state_list:
+            df1 = data.loc[data['state'] == state]
+            start_dates.append(min(df1['date']).strftime("%Y-%m-%d"))
+        max_min_date = max(start_dates)
+        print('!!! min_dates', max_min_date)
+
+        for state in self.state_list:
+            df1 = data.loc[data['state'] == state].set_index('date')
+            # lastUpdatedDate = df1['lastUpdateEt'].iloc[0]
+            df1 = df1[max_min_date:]
+            ### making new columns to process columns of interest and preserve the original data
+            df1['input_onVentilator_Increase'] = df1['onVentilatorCumulative']
+            df1['input_inICU_Increase'] = df1['inIcuCumulative']
+            df1['input_test_positive_rate'] = df1['positiveTestsViral'] / df1['totalTestsViral']
+            df1['input_case_Increase'] = df1['positiveIncrease']
+            df1['input_death_Increase'] = df1['deathIncrease']
+
+            df.update({state: df1})
 
         if self.if_moving_avg_data:
             for state in self.state_list:
@@ -209,10 +420,10 @@ class time_series_tensor():
         data_new = data_sub[2:, :].astype(int)
 
         idx = np.where(data_new[-1, :] > 0)
-        data_new = data_new[:,idx]
-        data_new = data_new[:,0,:]
+        data_new = data_new[:, idx]
+        data_new = data_new[:, 0, :]
         # data_new[:,1] = np.zeros(data_new.shape[0])
-        city_list = data_sub[0,idx][0]
+        city_list = data_sub[0, idx][0]
         print('city_list', city_list)
 
         return data_new.T, city_list
@@ -262,7 +473,7 @@ class time_series_tensor():
             else:
                 a = time_interval_initial + i
 
-            Y = self.data[:, a:a+k, :]  # shape 2 * k * x[2]
+            Y = self.data[:, a:a + k, :]  # shape 2 * k * x[2]
             Y = Y[:, :, :, np.newaxis]
             # print('Y.shape', Y.shape)
             if i == 0:
@@ -273,22 +484,24 @@ class time_series_tensor():
 
     def extract_patches_interval(self, time_interval_initial, time_interval_terminal):
         '''
-        Extract all patches (segments) of size 'patch_size' during the given interval
+        Extract a given number of patches (segments) of size 'patch_size' during the given interval
+        X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
         '''
-        x = self.data.shape  # shape = 2 (ask, bid) * time * country
-        k = self.patch_size
+        x = self.data.shape  # shape = (# states) x (# days) x (# variables)
+        k = self.patch_size  # num of consecutive days to form a single patch = window length
 
-        X = np.zeros(shape=(x[0], k, x[2], 1))  # 2 (ask, bid) * window length * country * num_patches_perbatch
+        X = np.zeros(
+            shape=(x[0], k, x[2], 1))  # (# states) x (# window length) x (# variables) x (num_patches_perbatch)
         for i in np.arange(self.num_patches_perbatch):
-            a = np.random.choice(np.arange(time_interval_initial, time_interval_terminal-k+1))
-            Y = self.data[:, a:a+k, :]  # shape 2 * k * x[2]
+            a = np.random.choice(np.arange(time_interval_initial, time_interval_terminal - k + 1))
+            Y = self.data[:, a:a + k, :]  # shape 2 * k * x[2]
             Y = Y[:, :, :, np.newaxis]
             # print('Y.shape', Y.shape)
             if i == 0:
                 X = Y
             else:
                 X = np.append(X, Y, axis=3)  # x is class ndarray
-        return X  # X.shape = (2, k, num_countries, num_patches_perbatch)
+        return X
 
     def data_to_patches(self):
         '''
@@ -362,7 +575,7 @@ class time_series_tensor():
             axs.xaxis.set_label_coords(0.5, -0.05)  # adjust location of importance appearing beneath patches
 
         handles, labels = axs.get_legend_handles_labels()
-        fig.legend(handles, labels, loc='center right') ## bbox_to_anchor=(0,0)
+        fig.legend(handles, labels, loc='center right')  ## bbox_to_anchor=(0,0)
         # plt.suptitle(cases + '-Temporal Dictionary of size %d'% k, fontsize=16)
         # plt.subplots_adjust(left=0.01, right=0.55, bottom=0.05, top=0.99, wspace=0.1, hspace=0.4)  # for 24 atoms
 
@@ -373,12 +586,13 @@ class time_series_tensor():
             if filename is None:
                 plt.savefig('Time_series_dictionary/' + str(foldername) + '/Dict-' + cases + '.png')
             else:
-                plt.savefig('Time_series_dictionary/' + str(foldername) + '/Dict-' + cases +'_' +str(filename) +'.png')
+                plt.savefig(
+                    'Time_series_dictionary/' + str(foldername) + '/Dict-' + cases + '_' + str(filename) + '.png')
         if if_show:
             plt.show()
 
-
-    def display_dictionary_COVIDactnow(self, W, state_name, if_show, if_save, foldername, filename=None, custom_code4ordering=None):
+    def display_dictionary_Hospital(self, W, state_name, if_show, if_save, foldername, filename=None,
+                                    custom_code4ordering=None):
         k = self.patch_size
         x = self.data.shape
         rows = np.floor(np.sqrt(self.n_components)).astype(int)
@@ -408,30 +622,20 @@ class time_series_tensor():
             dict = W[:, idx[i]].reshape(x[0], k, x[2])
             # print('x.shape', x)
             j = self.state_list.index(state_name)
+            marker_list = itertools.cycle(('*', 'x', '^', 'o', '|', '+'))
 
             for c in np.arange(dict.shape[2]):
                 variable_name = self.input_variable_list[c]
                 variable_name = variable_name.replace('input_', '')
 
-                if variable_name == 'Infected':
-                    marker = '*'
-                elif variable_name == 'Deaths':
-                    marker = 'x'
-                elif variable_name == 'hospitalBedsRequired':
-                    marker = '^'
-                elif variable_name == 'ICUBedsInUse':
-                    marker = 'o'
-                elif variable_name == 'ventilatorsInUse':
-                    marker = '|'
-
-                axs.plot(np.arange(k), dict[j, :, c], marker=marker, label=variable_name)
+                axs.plot(np.arange(k), dict[j, :, c], marker=next(marker_list), label=variable_name)
 
             axs.set_xlabel('%1.2f' % importance[idx[i]], fontsize=13)  # get the largest first
             axs.xaxis.set_label_coords(0.5, -0.05)  # adjust location of importance appearing beneath patches
 
         handles, labels = axs.get_legend_handles_labels()
-        fig.legend(handles, labels, loc='center right') ## bbox_to_anchor=(0,0)
-        plt.suptitle(str(state_name) + '-Temporal Dictionary of size %d'% k, fontsize=16)
+        fig.legend(handles, labels, loc='center right')  ## bbox_to_anchor=(0,0)
+        plt.suptitle(str(state_name) + '-Temporal Dictionary of size %d' % k, fontsize=16)
         # plt.subplots_adjust(left=0.01, right=0.55, bottom=0.05, top=0.99, wspace=0.1, hspace=0.4)  # for 24 atoms
 
         plt.subplots_adjust(left=0.01, right=0.62, bottom=0.1, top=0.8, wspace=0.1, hspace=0.4)  # for 12 atoms
@@ -441,7 +645,8 @@ class time_series_tensor():
             if filename is None:
                 plt.savefig('Time_series_dictionary/' + str(foldername) + '/Dict-' + str(state_name) + '.png')
             else:
-                plt.savefig('Time_series_dictionary/' + str(foldername) + '/Dict-' + str(state_name) +'_' +str(filename) +'.png')
+                plt.savefig('Time_series_dictionary/' + str(foldername) + '/Dict-' + str(state_name) + '_' + str(
+                    filename) + '.png')
         if if_show:
             plt.show()
 
@@ -478,7 +683,7 @@ class time_series_tensor():
                 else:
                     cases = 'recovered'
 
-                dict = W[:, idx[i]].reshape(x[0], k, x[2])   ### atoms with highest importance appears first
+                dict = W[:, idx[i]].reshape(x[0], k, x[2])  ### atoms with highest importance appears first
                 for j in np.arange(dict.shape[0]):
 
                     if c == 0:
@@ -488,26 +693,32 @@ class time_series_tensor():
                     else:
                         marker = 's'
 
-                    axs.plot(np.arange(k), dict[j, :, c], marker=marker, label=''+str(cases))
+                    axs.plot(np.arange(k), dict[j, :, c], marker=marker, label='' + str(cases))
                 axs.set_xlabel('%1.2f' % importance[idx[i]], fontsize=14)  # get the largest first
                 axs.xaxis.set_label_coords(0.5, -0.05)  # adjust location of importance appearing beneath patches
 
         handles, labels = axs.get_legend_handles_labels()
-        fig.legend(handles, labels, loc='lower center') ## bbox_to_anchor=(0,0)
+        fig.legend(handles, labels, loc='lower center')  ## bbox_to_anchor=(0,0)
         # plt.suptitle(str(self.country_list[0]) + '-Temporal Dictionary of size %d'% k, fontsize=16)
         plt.subplots_adjust(left=0.01, right=0.99, bottom=0.3, top=0.99, wspace=0.1, hspace=0.4)
         # plt.tight_layout()
 
         if if_save:
-            plt.savefig('Time_series_dictionary/' + str(foldername) +'/Dict-' + str(self.country_list[0])+ '_' + str(filename) + '.png')
+            plt.savefig('Time_series_dictionary/' + str(foldername) + '/Dict-' + str(self.country_list[0]) + '_' + str(
+                filename) + '.png')
         if if_show:
             plt.show()
 
-    def display_prediction_single_COVIDactnow(self, path, prediction, if_show, if_save, foldername, filename, if_errorbar=True):
-        A = self.read_data_COVIDactnow(path=path)[1]  ### ndarray with shape states x days x variables
+    def display_prediction_single_Hospital(self, prediction, if_show, if_save, foldername, filename, if_errorbar=True):
+        A = self.data
         k = self.patch_size
         A_recons = prediction
+        print('!!!!!!!A_recons.shape', A_recons.shape)
         A_predict = A_recons.copy()
+
+        if self.if_log_scale:
+            A = np.exp(A) - 1
+            A_recons = np.exp(A_recons) - 1
 
         if if_errorbar:
             # print('!!!', A_predict.shape)  # trials x states x days x variables
@@ -515,15 +726,11 @@ class time_series_tensor():
             A_std = np.std(A_recons, axis=0)
             print('!!! A_std', A_std)
 
-        if self.if_log_scale:
-            A = np.exp(A) - 1
-            A_predict = np.exp(A_predict) - 1
-
         ### Make gridspec
         fig1 = plt.figure(figsize=(10, 10), constrained_layout=False)
         gs1 = fig1.add_gridspec(nrows=A_predict.shape[2], ncols=A_predict.shape[0], wspace=0.2, hspace=0.2)
 
-        font = font_manager.FontProperties(family="Times New Roman", size=11)
+        # font = font_manager.FontProperties(family="Times New Roman", size=11)
 
         for i in range(A_predict.shape[0]):
             for c in range(A_predict.shape[2]):
@@ -534,41 +741,44 @@ class time_series_tensor():
                 variable_name = variable_name.replace('input_', '')
 
                 ### get days xticks
-                x_data = pd.date_range('2020-03-04', periods=A.shape[1], freq='D')
-                x_data_recons = pd.date_range('2020-03-04', periods=A_predict.shape[1] - self.patch_size, freq='D')
+                start_day = self.df.get(self.state_list[0]).index[0]
+                x_data = pd.date_range(start_day, periods=A.shape[1], freq='D')
+                x_data_recons = pd.date_range(start_day, periods=A_predict.shape[1] - self.patch_size, freq='D')
                 x_data_recons += pd.DateOffset(self.patch_size)
 
                 ### plot axs
-                ax.plot(x_data, A[0, :, c], 'b-', marker='o', markevery=5, label='Original-' + str(variable_name))
+                ax.plot(x_data, A[i, :, c], 'b-', marker='o', markevery=5, label='Original-' + str(variable_name))
 
                 if not if_errorbar:
                     ax.plot(x_data_recons, A_predict[i, self.patch_size:A_predict.shape[1], c],
-                             'r-', marker='x', markevery=5, label='Prediction-' + str(variable_name))
+                            'r-', marker='x', markevery=5, label='Prediction-' + str(variable_name))
                 else:
-                    ax.errorbar(x_data_recons, A_predict[i, self.patch_size:A_predict.shape[1], c], yerr= A_std[i, self.patch_size:A_predict.shape[1], c],
-                             fmt='r-', label='Prediction-' + str(variable_name), errorevery=2)
+                    ax.errorbar(x_data_recons, A_predict[i, self.patch_size:A_predict.shape[1], c],
+                                yerr=A_std[i, self.patch_size:A_predict.shape[1], c],
+                                fmt='r-', label='Prediction-' + str(variable_name), errorevery=2)
 
-                ax.set_ylim(0, np.maximum(np.max(A[i, :, c]), np.max(A_predict[i, :, c] + A_std[i,:,c]))*1.1)
+                ax.set_ylim(0, np.maximum(np.max(A[i, :, c]), np.max(A_predict[i, :, c] + A_std[i, :, c])) * 1.1)
 
                 if c == 0:
-                    ax.set_title(str(self.state_list[i]), font=font, size=15)
+                    ax.set_title(str(self.state_list[i]), fontsize=15)
 
                 ax.yaxis.set_label_position("left")
                 # ax.yaxis.set_label_coords(0, 2)
                 # ax.set_ylabel(str(list[j]), rotation=90)
                 ax.set_ylabel('population', fontsize=10)  # get the largest first
                 ax.yaxis.set_label_position("left")
-                ax.legend(prop=font)
+                ax.legend()
 
         fig1.autofmt_xdate()
-        #fig.suptitle('Plot of original and 1-step prediction -- ' + 'COVID-19 : '+ str(self.country_list[0]) +
+        # fig.suptitle('Plot of original and 1-step prediction -- ' + 'COVID-19 : '+ str(self.country_list[0]) +
         #             "\n seg. length = %i, # temp. dict. atoms = %i, learning exponent = %1.3f" % (self.patch_size, self.n_components, self.beta),
         #             fontsize=12, y=0.96)
         # plt.tight_layout()
         plt.subplots_adjust(left=0.1, right=0.9, bottom=0.1, top=0.95, wspace=0.08, hspace=0.23)
 
         if if_save:
-            plt.savefig('Time_series_dictionary/' + str(foldername) +'/Plot-'+str(self.state_list[0])+'-'+str(filename)+'.png')
+            plt.savefig('Time_series_dictionary/' + str(foldername) + '/Plot-' + str(self.state_list[0]) + '-' + str(
+                filename) + '.png')
         if if_show:
             plt.show()
 
@@ -616,15 +826,16 @@ class time_series_tensor():
             axs.yaxis.set_label_position("right")
             axs.legend(fontsize=11)
 
-
-        fig.suptitle('Plot of original and 1-step prediction -- ' + 'COVID-19 : '+ str(self.country_list[0]) +
-                     "\n seg. length = %i, # temp. dict. atoms = %i, learning exponent = %1.3f" % (self.patch_size, self.n_components, self.beta),
+        fig.suptitle('Plot of original and 1-step prediction -- ' + 'COVID-19 : ' + str(self.country_list[0]) +
+                     "\n seg. length = %i, # temp. dict. atoms = %i, learning exponent = %1.3f" % (
+                     self.patch_size, self.n_components, self.beta),
                      fontsize=12, y=0.96)
         plt.tight_layout(rect=[0, 0.03, 1, 0.9])
         # plt.subplots_adjust(left=0.2, right=0.9, bottom=0.1, top=0.85, wspace=0.08, hspace=0.23)
 
         if if_save:
-            plt.savefig('Time_series_dictionary/' + str(foldername) +'/Plot-'+str(self.country_list[0])+'-'+str(filename)+'.png')
+            plt.savefig('Time_series_dictionary/' + str(foldername) + '/Plot-' + str(self.country_list[0]) + '-' + str(
+                filename) + '.png')
         if if_show:
             plt.show()
 
@@ -661,7 +872,6 @@ class time_series_tensor():
         else:
             c = 2
 
-
         fig, axs = plt.subplots(nrows=3, ncols=2, figsize=(8, 5))
         for axs, j in zip(axs.flat, range(L)):
             country_name = self.country_list[j]
@@ -672,12 +882,12 @@ class time_series_tensor():
             axs_original = axs.plot(x_data, A[j, :, c], 'b-', marker='o', markevery=5, label='Original')
             if not if_errorbar:
                 axs_recons = axs.plot(x_data_recons, A_predict[j, self.patch_size:A_predict.shape[1], c],
-                         'r-', marker='x', markevery=5, label='Prediction-' + str(country_name))
+                                      'r-', marker='x', markevery=5, label='Prediction-' + str(country_name))
             else:
                 y = A_predict[j, self.patch_size:A_predict.shape[1], c]
-                axs_recons = axs.errorbar(x_data_recons, y, yerr= A_std[j, self.patch_size:A_predict.shape[1], c],
-                                          fmt='r-.', label='Prediction', errorevery=2,)
-            axs.set_ylim(0, np.maximum(np.max(A[j, :, c]), np.max(A_predict[j, :, c] + A_std[j,:,c]))*1.1)
+                axs_recons = axs.errorbar(x_data_recons, y, yerr=A_std[j, self.patch_size:A_predict.shape[1], c],
+                                          fmt='r-.', label='Prediction', errorevery=2, )
+            axs.set_ylim(0, np.maximum(np.max(A[j, :, c]), np.max(A_predict[j, :, c] + A_std[j, :, c])) * 1.1)
 
             # ax.text(2, 0.65, str(list[j]))
             axs.yaxis.set_label_position("right")
@@ -687,18 +897,28 @@ class time_series_tensor():
             axs.legend(fontsize=9)
 
             fig.autofmt_xdate()
-            fig.suptitle('Plot of original and 1-step prediction -- ' + 'COVID-19:'+ cases +
-                         "\n segment length = %i, # temporal dictionary atoms = %i" % (self.patch_size, self.n_components),
+            fig.suptitle('Plot of original and 1-step prediction -- ' + 'COVID-19:' + cases +
+                         "\n segment length = %i, # temporal dictionary atoms = %i" % (
+                         self.patch_size, self.n_components),
                          fontsize=12, y=1)
             plt.tight_layout(rect=[0, 0.03, 1, 0.9])
             # plt.subplots_adjust(left=0.2, right=0.9, bottom=0.1, top=0.85, wspace=0.08, hspace=0.23)
 
         if if_save:
-            plt.savefig('Time_series_dictionary/' + str(foldername) +'/Plot-'+ cases + '.png')
+            plt.savefig('Time_series_dictionary/' + str(foldername) + '/Plot-' + cases + '.png')
         if if_show:
             plt.show()
 
-    def train_dict(self, mode, alpha, beta, learn_joint_dict, foldername):
+    def train_dict(self,
+                   mode,
+                   alpha,
+                   beta,
+                   learn_joint_dict,
+                   foldername,
+                   iterations=None,
+                   update_self=True,
+                   if_save=True,
+                   print_iter=False):
         print('training dictionaries from patches along mode %i...' % mode)
         '''
         Trains dictionary based on patches from an i.i.d. sequence of batch of patches 
@@ -709,22 +929,27 @@ class time_series_tensor():
         At = []
         Bt = []
         code = self.code
-        for t in np.arange(self.iterations):
+        if iterations is not None:
+            n_iter = iterations
+        else:
+            n_iter = self.ONMF_iterations
+
+        for t in np.arange(n_iter):
             X = self.extract_random_patches()
             if t == 0:
                 self.ntf = Online_NTF(X, self.n_components,
-                                      iterations=self.sub_iterations,
-                                      learn_joint_dict = learn_joint_dict,
+                                      iterations=self.ONMF_sub_iterations,
+                                      learn_joint_dict=learn_joint_dict,
                                       mode=mode,
                                       alpha=alpha,
                                       beta=beta,
-                                      batch_size=self.batch_size)  # max number of possible patches
+                                      batch_size=self.ONMF_batch_size)  # max number of possible patches
                 W, At, Bt, H = self.ntf.train_dict_single()
                 code += H
             else:
                 self.ntf = Online_NTF(X, self.n_components,
-                                      iterations=self.sub_iterations,
-                                      batch_size=self.batch_size,
+                                      iterations=self.ONMF_sub_iterations,
+                                      batch_size=self.ONMF_batch_size,
                                       ini_dict=W,
                                       ini_A=At,
                                       ini_B=Bt,
@@ -737,157 +962,262 @@ class time_series_tensor():
                 # for "iterations" iterations
                 W, At, Bt, H = self.ntf.train_dict_single()
                 code += H
-            print('Current minibatch training iteration %i out of %i' % (t, self.iterations))
-        self.W = W
-        self.code = code
+
+            if print_iter:
+                print('Current minibatch training iteration %i out of %i' % (t, self.ONMF_iterations))
+
+        if update_self:
+            self.W = W
+            self.code = code
         # print('code_right_after_training', self.code)
-        if self.if_covidactnow:
+        if self.data_source != 'JHU':
             list = self.state_list
         else:
             list = self.country_list
 
-        print('dict_shape:', self.W.shape)
-        print('code_shape:', self.code.shape)
-        np.save('Time_series_dictionary/' + str(foldername) +'/dict_learned_' + str(mode) +'_'+ 'pretraining' + '_'+ str(list[0]), self.W)
-        np.save('Time_series_dictionary/' + str(foldername) +'/code_learned_' + str(mode) +'_'+ 'pretraining' + '_'+ str(list[0]), self.code)
-        np.save('Time_series_dictionary/' + str(foldername) +'/At_' + str(mode) + '_' + 'pretraining' + '_' + str(list[0]), At)
-        np.save('Time_series_dictionary/' + str(foldername) +'/Bt_' + str(mode) + '_' + 'pretraining' + '_' + str(list[0]), Bt)
-        return W, At, Bt, self.code
+        print('dict_shape:', W.shape)
+        print('code_shape:', code.shape)
+        if if_save:
+            np.save('Time_series_dictionary/' + str(foldername) + '/dict_learned_' + str(
+                mode) + '_' + 'pretraining' + '_' + str(list[0]), self.W)
+            np.save('Time_series_dictionary/' + str(foldername) + '/code_learned_' + str(
+                mode) + '_' + 'pretraining' + '_' + str(list[0]), self.code)
+            np.save('Time_series_dictionary/' + str(foldername) + '/At_' + str(mode) + '_' + 'pretraining' + '_' + str(
+                list[0]), At)
+            np.save('Time_series_dictionary/' + str(foldername) + '/Bt_' + str(mode) + '_' + 'pretraining' + '_' + str(
+                list[0]), Bt)
+        return W, At, Bt, code
 
-    def online_learning_and_prediction(self,
-                                       mode,
-                                       foldername,
-                                       ini_dict=None,
-                                       ini_A=None,
-                                       ini_B=None,
-                                       beta=1,
-                                       a1=1,   # regularizer for the code in partial fitting
-                                       a2=5,   # regularizer for the code in recursive prediction
-                                       future_extraploation_length=0,
-                                       if_learn_online = True,
-                                       if_save=True):
+    def ONMF_timeseris_predictor(self,
+                                 mode,
+                                 foldername,
+                                 data=None,
+                                 ini_dict=None,
+                                 ini_A=None,
+                                 ini_B=None,
+                                 beta=1,
+                                 a1=1,  # regularizer for the code in partial fitting
+                                 a2=1,  # regularizer for the code in recursive prediction
+                                 future_extraploation_length=0,
+                                 if_learn_online=True,
+                                 if_save=True,
+                                 # if_recons = True,  ### Reconstruct observed data using learned dictionary
+                                 minibatch_training_initialization=False,
+                                 minibatch_alpha=1,
+                                 minibatch_beta=1,
+                                 print_iter=False,
+                                 num_trials=1):
         print('online learning and predicting from patches along mode %i...' % mode)
         '''
         Trains dictionary along a continuously sliding window over the data stream 
         Predict forthcoming data on the fly. This could be made to affect learning rate 
         '''
-        A = self.data
-        # print('A.shape', A.shape)
-        k = self.patch_size
+        if data is None:
+            A = self.data
+        else:
+            A = data
+
+        # print('!!!!!!!!!! A.shape', A.shape)
+
+        k = self.patch_size  # Window length
         L = self.prediction_length
         # A_recons = np.zeros(shape=A.shape)
         # print('A_recons.shape',A_recons.shape)
         # W = self.W
-        self.W = ini_dict
         # print('W.shape', self.W.shape)
         At = []
         Bt = []
         H = []
         # A_recons = np.zeros(shape=(A.shape[0], k+L-1, A.shape[2]))
-        A_recons = A[:, 0:k + L - 1, :]
-        error = np.zeros(shape=(A.shape[0], k - 1, A.shape[2]))
 
-        code = self.code
-        # print('data.shape', self.data.shape)
-        # iter = np.floor(A.shape[1]/self.num_patches_perbatch).astype(int)
-        for t in np.arange(k, A.shape[1]):
-            a = np.maximum(0, t - self.num_patches_perbatch)
-            X = self.extract_patches_interval(time_interval_initial=a,
-                                              time_interval_terminal=t)  # get patch from the past
-            # print('X.shape', X.shape)
-            if t == k:
-                self.ntf = Online_NTF(X, self.n_components,
-                                      iterations=self.sub_iterations,
-                                      learn_joint_dict=True,
-                                      mode=mode,
-                                      ini_dict=self.W,
-                                      ini_A=ini_A,
-                                      ini_B=ini_B,
-                                      batch_size=self.batch_size,
-                                      subsample=self.subsample,
-                                      beta=beta)
-                self.W, At, Bt, H = self.ntf.train_dict_single()
-                self.code += H
-                # print('W', W)
+        list_full_predictions = []
+        for trial in np.arange(num_trials):
+            ### Initialize self parameters
+            self.W = ini_dict
+            A_recons = A[:, 0:k + L - 1, :]
+            At = []
+            Bt = []
 
+            print('!!!!!! self.data.shape', self.data.shape)
+            if minibatch_training_initialization:
+                # print('!!! self.W right before minibatch training', self.W)
+                self.W, At, Bt, H = self.train_dict(mode=3,
+                                                    alpha=minibatch_alpha,
+                                                    beta=minibatch_beta,
+                                                    iterations=self.ONMF_iterations,
+                                                    learn_joint_dict=True,
+                                                    foldername=None,
+                                                    update_self=True,
+                                                    if_save=False)
 
-                # prediction step
-                patch = A[:, t - k + L:t, :]
-                patch_recons = self.predict_joint_single(patch, a1)
-                # print('patch_recons', patch_recons)
-                A_recons = np.append(A_recons, patch_recons, axis=1)
-
-            else:
-
-                if t % self.learnevery == 0 and if_learn_online:  # do not learn from zero data (make np.sum(X)>0 for online learning)
+            # print('data.shape', self.data.shape)
+            # iter = np.floor(A.shape[1]/self.num_patches_perbatch).astype(int)
+            for t in np.arange(k, A.shape[1]):
+                a = np.maximum(0, t - self.num_patches_perbatch)
+                X = self.extract_patches_interval(time_interval_initial=a,
+                                                  time_interval_terminal=t)  # get patch from the past
+                # print('X.shape', X.shape)
+                # X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
+                if t == k:
                     self.ntf = Online_NTF(X, self.n_components,
-                                          iterations=self.sub_iterations,
-                                          batch_size=self.batch_size,
-                                          ini_dict=self.W,
-                                          ini_A=At,
-                                          ini_B=Bt,
+                                          iterations=self.ONMF_sub_iterations,
                                           learn_joint_dict=True,
                                           mode=mode,
-                                          history=self.ntf.history,
+                                          ini_dict=self.W,
+                                          ini_A=ini_A,
+                                          ini_B=ini_B,
+                                          batch_size=self.ONMF_batch_size,
                                           subsample=self.subsample,
                                           beta=beta)
-
                     self.W, At, Bt, H = self.ntf.train_dict_single()
-                    # print('dictionary_updated')
                     self.code += H
 
-                # prediction step
-                patch = A[:, t - k + L:t, :]
-                # print('patch.shape', patch.shape)
-                patch_recons = self.predict_joint_single(patch, a1)
+                    # prediction step
+                    patch = A[:, t - k + L:t, :]
+                    patch_recons = self.predict_joint_single(patch, a1)
+                    # print('patch_recons', patch_recons)
+                    A_recons = np.append(A_recons, patch_recons, axis=1)
+
+
+                else:
+                    if t % self.learnevery == 0 and if_learn_online:  # do not learn from zero data (make np.sum(X)>0 for online learning)
+                        self.ntf = Online_NTF(X, self.n_components,
+                                              iterations=self.ONMF_sub_iterations,
+                                              batch_size=self.ONMF_batch_size,
+                                              ini_dict=self.W,
+                                              ini_A=At,
+                                              ini_B=Bt,
+                                              learn_joint_dict=True,
+                                              mode=mode,
+                                              history=self.ntf.history,
+                                              subsample=self.subsample,
+                                              beta=beta)
+
+                        self.W, At, Bt, H = self.ntf.train_dict_single()
+                        # print('dictionary_updated')
+                        self.code += H
+
+                    # prediction step
+                    patch = A[:, t - k + L:t, :]
+                    # print('patch.shape', patch.shape)
+                    patch_recons = self.predict_joint_single(patch, a1)
+                    A_recons = np.append(A_recons, patch_recons, axis=1)
+                    # print('!!!!!!!!!!!! A_recons.shape', A_recons.shape)
+            if print_iter:
+                print('Current (trial, day) for ONMF_predictor (%i, %i) out of (%i, %i)' % (trial, t, num_trials, A.shape[1]-1))
+            # forward recursive prediction begins
+            for t in np.arange(A.shape[1], A.shape[1] + future_extraploation_length):
+                patch = A_recons[:, t - k + L:t, :]
+                patch_recons = self.predict_joint_single(patch, a2)
                 A_recons = np.append(A_recons, patch_recons, axis=1)
+            print('new cases predicted final', A_recons[0, -1, 0])
 
-            print('Current iteration for online learning/prediction %i out of %i' % (t, self.iterations))
+            ### initial regulation
+            A_recons[:, 0:self.learnevery + L, :] = A[:, 0:self.learnevery + L, :]
+            ### patch the two reconstructions
+            # A_recons = np.append(A_recons, A_recons[:,A.shape[1]:, :], axis=1)
 
-        # forward recursive prediction begins
-        for t in np.arange(A.shape[1], A.shape[1] + future_extraploation_length):
-            patch = A_recons[:, t - k + L:t, :]
-            patch_recons = self.predict_joint_single(patch, a2)
-            A_recons = np.append(A_recons, patch_recons, axis=1)
-        print('new cases predicted final', A_recons[0, -1, 0])
-        '''
-        A_recons_future = A.copy()
-        A_recons_future = np.append(A_recons_future, np.expand_dims(A_recons[:,-1,:], axis=1), axis=1)
-        for t in np.arange(A.shape[1], A.shape[1] + future_extraploation_length):
-            patch = A_recons_future[:, t - k + L:t, :]
-            patch_recons = self.predict_joint_single(patch, a1)
-            A_recons_future = np.append(A_recons_future, patch_recons, axis=1)
-        print('new cases predicted final', A_recons_future[0, -1, 0])
-        '''
+            print('!!!!! A_recons', A_recons.shape)
 
-            # print('Current iteration %i out of %i' % (t, self.iterations))
+            list_full_predictions.append(A_recons.copy())
 
-        ### initial regulation
-        A_recons[:, 0:self.learnevery + L, :] = A[:, 0:self.learnevery + L, :]
-        ### patch the two reconstructions
-        # A_recons = np.append(A_recons, A_recons[:,A.shape[1]:, :], axis=1)
+        A_full_predictions_trials = np.asarray(list_full_predictions)  ## shape = (# trials) x (# states) x (# days + L) x (# varibles)
 
-
-        # print('error.shape', error.shape)
-        # print('error shape', error[:,0:learn_every+1,:].shape)
-        # error[:,0:learn_every+1,:] = np.zeros(shape=(error.shape[0], learn_every, error.shape[2]))
-
-        # print('A_recons', A_recons.shape)
-        # print(W)
-        # print('dict_shape:', self.W.shape)
-        # print('code_shape:', self.code.shape)
-        if self.if_covidactnow:
+        if self.data_source != 'JHU':
             list = self.state_list
         else:
             list = self.country_list
 
         if if_save:
-            np.save('Time_series_dictionary/' + str(foldername) +'/dict_learned_tensor' +'_'+ str(list[0]) + '_' +'afteronline' + str(self.beta), self.W)
-            np.save('Time_series_dictionary/' + str(foldername) +'/code_learned_tensor' +'_'+ str(list[0]) + '_' +'afteronline' + str(self.beta), self.code)
-            np.save('Time_series_dictionary/' + str(foldername) +'/At' + str(list[0]) + '_' +'afteronline' + str(self.beta), At)
-            np.save('Time_series_dictionary/' + str(foldername) +'/Bt' + str(list[0]) + '_' +'afteronline' + str(self.beta), Bt)
-            np.save('Time_series_dictionary/' + str(foldername) +'/recons', A_recons)
-        return A_recons, error, self.W, At, Bt, self.code
+            np.save('Time_series_dictionary/' + str(foldername) + '/dict_learned_tensor' + '_' + str(
+                list[0]) + '_' + 'afteronline' + str(self.beta), self.W)
+            np.save('Time_series_dictionary/' + str(foldername) + '/code_learned_tensor' + '_' + str(
+                list[0]) + '_' + 'afteronline' + str(self.beta), self.code)
+            np.save('Time_series_dictionary/' + str(foldername) + '/At' + str(list[0]) + '_' + 'afteronline' + str(
+                self.beta), At)
+            np.save('Time_series_dictionary/' + str(foldername) + '/Bt' + str(list[0]) + '_' + 'afteronline' + str(
+                self.beta), Bt)
+            np.save('Time_series_dictionary/' + str(foldername) + '/recons', A_recons)
+        return A_full_predictions_trials, self.W, At, Bt, self.code
+
+    def ONMF_timeseris_predictor_historic(self,
+                                          mode,
+                                          foldername,
+                                          ini_dict=None,
+                                          ini_A=None,
+                                          ini_B=None,
+                                          beta=1,
+                                          a1=1,  # regularizer for the code in partial fitting
+                                          a2=1,  # regularizer for the code in recursive prediction
+                                          future_extraploation_length=0,
+                                          if_save=True,
+                                          minibatch_training_initialization=False,
+                                          minibatch_alpha=1,
+                                          minibatch_beta=1,
+                                          num_trials=1):  # take a number of trials to generate empirical confidence interval
+
+        print('Running ONMF_timeseries_predictor_historic along mode %i...' % mode)
+        '''
+        Apply online_learning_and_prediction for intervals [0,t] for every 1\le t\le T to make proper all-time predictions 
+        for evaluation  
+        '''
+
+        A = self.data
+
+        # print('A.shape', A.shape)
+        k = self.patch_size
+        L = self.prediction_length
+        FEL = future_extraploation_length
+        # A_recons = np.zeros(shape=A.shape)
+        # print('A_recons.shape',A_recons.shape)
+        # W = self.W
+        self.W = ini_dict
+        # print('W.shape', self.W.shape)
+
+        # A_recons = np.zeros(shape=(A.shape[0], k+L-1, A.shape[2]))
+        A_recons = A[:, 0:k + L - 1, :]
+
+        list_full_predictions = []
+        for trial in np.arange(num_trials):
+
+            ### A_total_prediction.shape = (# days) x (# states) x (FEL) x (# variables)
+            A_total_prediction = np.zeros(shape=(k + 1, A.shape[0], FEL, A.shape[2]))
+            ### fill in predictions for the first k days with the raw data
+            for i in np.arange(k + 1):
+                A_total_prediction[i, :, :, :] = A[:, i:i + FEL, :]
+
+            for t in np.arange(k + 1, A.shape[1]):
+                ### Set self.data to the truncated one during [1,t]
+                A1 = A[:, :t, :]
+                A_recons, W, At, Bt, code = self.ONMF_timeseris_predictor(mode,
+                                                                         foldername,
+                                                                         data=A1,
+                                                                         ini_dict=ini_dict,
+                                                                         ini_A=ini_A,
+                                                                         ini_B=ini_B,
+                                                                         beta=beta,
+                                                                         a1=a1,
+                                                                         # regularizer for the code in partial fitting
+                                                                         a2=a2,
+                                                                         # regularizer for the code in recursive prediction
+                                                                         future_extraploation_length=future_extraploation_length,
+                                                                         if_save=True,
+                                                                         minibatch_training_initialization=minibatch_training_initialization,
+                                                                         minibatch_alpha=minibatch_alpha,
+                                                                         minibatch_beta=minibatch_beta,
+                                                                         print_iter=False)
+
+                ### A_recons.shape = (# states, t+FEL, # variables)
+                A_total_prediction = np.append(A_total_prediction, A_recons[:, :, -FEL, :])
+
+                print('Current (trial, day) for ONMF_predictor_historic (%i, %i) out of (%i, %i)' % (trial, t, num_trials, A.shape[1] - k))
+
+            list_full_predictions.append(A_total_prediction)
+
+        A_full_predictions_trials = np.asarray(list_full_predictions)
+        print('!!! A_full_predictions_trials.shape', A_full_predictions_trials)
+
+        return A_full_predictions_trials
 
     def predict_joint_single(self, data, a1):
         k = self.patch_size
@@ -902,11 +1232,11 @@ class time_series_tensor():
         # for missing data, not needed for the COVID-19 data set
         # extract only rows of nonnegative values (disregarding missing entries) (negative = N/A)
 
-        J = np.where(np.min(A, axis=(0,1)) >= -1)
-        A_pos = A[:,:,J]
+        J = np.where(np.min(A, axis=(0, 1)) >= -1)
+        A_pos = A[:, :, J]
         # print('A_pos', A_pos)
         # print('np.min(A)', np.min(A))
-        W_tensor = W_tensor[:,:,J,:]
+        W_tensor = W_tensor[:, :, J, :]
         W_trimmed = W_tensor[:, 0:k - L, :, :]
         W_trimmed = W_trimmed.reshape((-1, self.n_components))
 
@@ -928,7 +1258,65 @@ class time_series_tensor():
 
         # now paint the reconstruction canvas
         # only add the last predicted value
-        A_recons = patch_recons[:,k-1,:]
-        return A_recons[:,np.newaxis,:]
+        A_recons = patch_recons[:, k - 1, :]
+        return A_recons[:, np.newaxis, :]
 
 
+us_state_abbrev = {
+    'Alabama': 'AL',
+    'Alaska': 'AK',
+    'American Samoa': 'AS',
+    'Arizona': 'AZ',
+    'Arkansas': 'AR',
+    'California': 'CA',
+    'Colorado': 'CO',
+    'Connecticut': 'CT',
+    'Delaware': 'DE',
+    'District of Columbia': 'DC',
+    'Florida': 'FL',
+    'Georgia': 'GA',
+    'Guam': 'GU',
+    'Hawaii': 'HI',
+    'Idaho': 'ID',
+    'Illinois': 'IL',
+    'Indiana': 'IN',
+    'Iowa': 'IA',
+    'Kansas': 'KS',
+    'Kentucky': 'KY',
+    'Louisiana': 'LA',
+    'Maine': 'ME',
+    'Maryland': 'MD',
+    'Massachusetts': 'MA',
+    'Michigan': 'MI',
+    'Minnesota': 'MN',
+    'Mississippi': 'MS',
+    'Missouri': 'MO',
+    'Montana': 'MT',
+    'Nebraska': 'NE',
+    'Nevada': 'NV',
+    'New Hampshire': 'NH',
+    'New Jersey': 'NJ',
+    'New Mexico': 'NM',
+    'New York': 'NY',
+    'North Carolina': 'NC',
+    'North Dakota': 'ND',
+    'Northern Mariana Islands': 'MP',
+    'Ohio': 'OH',
+    'Oklahoma': 'OK',
+    'Oregon': 'OR',
+    'Pennsylvania': 'PA',
+    'Puerto Rico': 'PR',
+    'Rhode Island': 'RI',
+    'South Carolina': 'SC',
+    'South Dakota': 'SD',
+    'Tennessee': 'TN',
+    'Texas': 'TX',
+    'Utah': 'UT',
+    'Vermont': 'VT',
+    'Virgin Islands': 'VI',
+    'Virginia': 'VA',
+    'Washington': 'WA',
+    'West Virginia': 'WV',
+    'Wisconsin': 'WI',
+    'Wyoming': 'WY'
+}
