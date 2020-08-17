@@ -65,6 +65,7 @@ class ONMF_timeseries_reconstructor():
         self.if_moving_avg_data = if_moving_avg_data
         self.if_log_scale = if_log_scale
         self.input_variable_list = []
+        self.result_dict = {}
 
         input_variable_list = []
 
@@ -79,6 +80,12 @@ class ONMF_timeseries_reconstructor():
             self.truncate_NAN_DataFrame()
             self.moving_avg_log_scale()
             self.extract_ndarray_from_DataFrame()
+            self.result_dict.update({'Data source': 'COVID_ACT_NOW'})
+            self.result_dict.update({'Full DataFrame': self.df})
+            self.result_dict.update({'Data array': self.data})
+            self.result_dict.update({'List_states': self.state_list})
+            self.result_dict.update({'List_variables': self.input_variable_list})
+
 
 
         elif data_source == 'COVID_TRACKING_PROJECT':
@@ -95,6 +102,12 @@ class ONMF_timeseries_reconstructor():
             self.moving_avg_log_scale()
             self.extract_ndarray_from_DataFrame()
             print('!!! df', self.df.get('Florida'))
+            self.result_dict.update({'Data source': 'COVID_Tracking_Project'})
+            self.result_dict.update({'Full DataFrame': self.df})
+            self.result_dict.update({'Data array': self.data})
+            self.result_dict.update({'List_states': self.state_list})
+            self.result_dict.update({'List_variables': self.input_variable_list})
+
 
 
         else:  ### JHU data
@@ -774,9 +787,13 @@ class ONMF_timeseries_reconstructor():
                     ax.plot(x_data_recons, A_predict[i, self.patch_size:A_predict.shape[1], c],
                             'r-', marker='x', markevery=5, label='Prediction-' + str(variable_name))
                 else:
-                    ax.errorbar(x_data_recons, A_predict[i, self.patch_size:A_predict.shape[1], c],
-                                yerr=A_std[i, self.patch_size:A_predict.shape[1], c],
-                                fmt='r-', label='Prediction-' + str(variable_name), errorevery=2)
+                    markers, caps, bars = ax.errorbar(x_data_recons,
+                                                      A_predict[i, self.patch_size:A_predict.shape[1], c],
+                                                      yerr=A_std[i, self.patch_size:A_predict.shape[1], c],
+                                                      fmt='r-', label='Prediction-' + str(variable_name), errorevery=1)
+
+                    [bar.set_alpha(0.5) for bar in bars]
+                    # [cap.set_alpha(0.5) for cap in caps]
 
                 ax.set_ylim(0, np.maximum(np.max(A[i, :, c]), np.max(A_predict[i, :, c] + A_std[i, :, c])) * 1.1)
 
@@ -1022,7 +1039,7 @@ class ONMF_timeseries_reconstructor():
                        future_extraploation_length=0,
                        if_learn_online=True,
                        if_save=True,
-                       # if_recons = True,  ### Reconstruct observed data using learned dictionary
+                       if_recons=True,  ### Reconstruct observed data using learned dictionary
                        minibatch_training_initialization=False,
                        minibatch_alpha=1,
                        minibatch_beta=1,
@@ -1095,9 +1112,12 @@ class ONMF_timeseries_reconstructor():
 
                     # prediction step
                     patch = A[:, t - k + L:t, :]
-                    patch_recons = self.predict_joint_single(patch, a1)
-                    # print('patch_recons', patch_recons)
-                    A_recons = np.append(A_recons, patch_recons, axis=1)
+                    if if_recons:
+                        patch_recons = self.predict_joint_single(patch, a1)
+                        # print('patch_recons', patch_recons)
+                        A_recons = np.append(A_recons, patch_recons, axis=1)
+                    else:
+                        A_recons = np.append(A_recons, patch, axis=1)
 
 
                 else:
@@ -1120,13 +1140,17 @@ class ONMF_timeseries_reconstructor():
 
                     # prediction step
                     patch = A[:, t - k + L:t, :]
-                    # print('patch.shape', patch.shape)
-                    patch_recons = self.predict_joint_single(patch, a1)
-                    A_recons = np.append(A_recons, patch_recons, axis=1)
+                    if if_recons:
+                        patch_recons = self.predict_joint_single(patch, a1)
+                        # print('patch_recons', patch_recons)
+                        A_recons = np.append(A_recons, patch_recons, axis=1)
+                    else:
+                        A_recons = np.append(A_recons, patch, axis=1)
+
                     # print('!!!!!!!!!!!! A_recons.shape', A_recons.shape)
             if print_iter:
                 print('Current (trial, day) for ONMF_predictor (%i, %i) out of (%i, %i)' % (
-                trial, t, num_trials, A.shape[1] - 1))
+                    trial, t, num_trials, A.shape[1] - 1))
             # forward recursive prediction begins
             for t in np.arange(A.shape[1], A.shape[1] + future_extraploation_length):
                 patch = A_recons[:, t - k + L:t, :]
@@ -1146,6 +1170,11 @@ class ONMF_timeseries_reconstructor():
         A_full_predictions_trials = np.asarray(
             list_full_predictions)  ## shape = (# trials) x (# states) x (# days + L) x (# varibles)
 
+        self.result_dict.update({'Evaluation_num_trials': str(num_trials)})
+        self.result_dict.update({'Evaluation_A_full_predictions_trials': A_full_predictions_trials})
+        self.result_dict.update({'Evaluation_Dictionary': self.W})
+        self.result_dict.update({'Evaluation_Code': self.code})
+
         if if_save:
             if self.data_source != 'JHU':
                 list = self.state_list
@@ -1155,9 +1184,9 @@ class ONMF_timeseries_reconstructor():
                 list[0]) + '_' + 'afteronline' + str(self.beta), self.W)
             np.save('Time_series_dictionary/' + str(foldername) + '/code_learned_tensor' + '_' + str(
                 list[0]) + '_' + 'afteronline' + str(self.beta), self.code)
-            np.save('Time_series_dictionary/' + str(foldername) + '/At' + str(list[0]) + '_' + 'afteronline' + str(
+            np.save('Time_series_dictionary/' + str(foldername) + '/At_' + str(list[0]) + '_' + 'afteronline' + str(
                 self.beta), At)
-            np.save('Time_series_dictionary/' + str(foldername) + '/Bt' + str(list[0]) + '_' + 'afteronline' + str(
+            np.save('Time_series_dictionary/' + str(foldername) + '/Bt_' + str(list[0]) + '_' + 'afteronline' + str(
                 self.beta), Bt)
             np.save('Time_series_dictionary/' + str(foldername) + '/recons', A_recons)
         return A_full_predictions_trials, self.W, At, Bt, self.code
@@ -1224,6 +1253,7 @@ class ONMF_timeseries_reconstructor():
                                                                 # regularizer for the code in recursive prediction
                                                                 future_extraploation_length=future_extraploation_length,
                                                                 if_save=True,
+                                                                if_recons=False,
                                                                 minibatch_training_initialization=minibatch_training_initialization,
                                                                 minibatch_alpha=minibatch_alpha,
                                                                 minibatch_beta=minibatch_beta,
@@ -1236,10 +1266,15 @@ class ONMF_timeseries_reconstructor():
                 A_total_prediction.append(A_recons[:, -FEL:, :])
                 ### A_recons.shape = (# states, t+FEL, # variables)
                 print('Current (trial, day) for ONMF_predictor_historic (%i, %i) out of (%i, %i)' % (
-                trial, t - k, num_trials, A.shape[1] - k - 1))
+                    trial, t - k, num_trials, A.shape[1] - k - 1))
 
             A_total_prediction = np.asarray(A_total_prediction)
             list_full_predictions.append(A_total_prediction)
+
+            self.result_dict.update({'Evaluation_num_trials': str(trial)})
+            self.result_dict.update({'Evaluation_A_full_predictions_trials': np.asarray(list_full_predictions)})
+            self.result_dict.update({'Evaluation_Dictionary': W})
+            self.result_dict.update({'Evaluation_Code': code})
 
         A_full_predictions_trials = np.asarray(list_full_predictions)
         print('!!! A_full_predictions_trials.shape', A_full_predictions_trials.shape)

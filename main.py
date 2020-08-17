@@ -23,8 +23,8 @@ def main_train_joint():
     n_components = 16
 
     # country_list = ['Korea, South', 'China', 'US', 'Italy', 'Germany', 'Spain']
-    # state_list = ['California', 'New York']
-    state_list = ['California', 'Florida', 'Texas', 'New York']
+    state_list = ['California', 'New York']
+    # state_list = ['California', 'Florida', 'Texas', 'New York']
     # state_list = ['CA', 'FL', 'TX', 'NY']
     # country_list = ['Russia', 'Brazil']
 
@@ -37,7 +37,7 @@ def main_train_joint():
     if_recons = False
     if_ONMF_timeseris_predictor_historic = True
     L = 60  ## prediction length
-    num_trials = 100
+    num_trials = 3
 
     reconstructor = ONMF_timeseries_reconstructor(path=path_COVID_tracking_proj,
                                                   source=source,
@@ -127,6 +127,8 @@ def main_train_joint():
         reconstructor.display_prediction_evaluation(A_full_predictions_trials[:, ], if_show=False, if_save=True,
                                                     foldername=foldername,
                                                     filename=filename, if_errorbar=True, if_evaluation=True)
+
+    np.save("Time_series_dictionary/full_result_" + str(data_source), reconstructor.result_dict)
 
     # np.save('Time_series_dictionary/' + str(foldername) + '/recons_nononline', A_recons)
 
