@@ -740,6 +740,9 @@ class ONMF_timeseries_reconstructor():
             #     A_recons1[:,i + A_predict1.shape[3],:,:] = A_predict1[:,i,:, -1,:]
             a = np.zeros(shape=(A_predict1.shape[0], A_predict1.shape[3], A.shape[0], A.shape[2]))
             A_recons1 = np.append(a, A_recons1, axis=1)
+            print('!!!! A.shape[1]+A_predict1.shape[3]', A.shape[1] + A_predict1.shape[3])
+            print('!!!! A_recons1.shape', A_recons1.shape)
+
 
             A_recons1 = np.swapaxes(A_recons1, axis1=1, axis2=2)
             for trial in np.arange(0, A_predict1.shape[0]):

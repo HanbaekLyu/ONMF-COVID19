@@ -23,8 +23,8 @@ def main_train_joint():
     n_components = 16
 
     # country_list = ['Korea, South', 'China', 'US', 'Italy', 'Germany', 'Spain']
-    state_list = ['California', 'New York']
-    # state_list = ['California', 'Florida', 'Texas', 'New York']
+    # state_list = ['California', 'New York']
+    state_list = ['California', 'Florida', 'Texas', 'New York']
     # state_list = ['CA', 'FL', 'TX', 'NY']
     # country_list = ['Russia', 'Brazil']
 
@@ -34,10 +34,10 @@ def main_train_joint():
     data_source = data_source_list[1]
     if_train_fresh = True
     if_display_dict = False
-    if_recons = False
-    if_ONMF_timeseris_predictor_historic = True
+    if_recons = True
+    if_ONMF_timeseris_predictor_historic = False
     L = 60  ## prediction length
-    num_trials = 3
+    num_trials = 1
 
     reconstructor = ONMF_timeseries_reconstructor(path=path_COVID_tracking_proj,
                                                   source=source,
