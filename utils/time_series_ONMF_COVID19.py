@@ -1033,7 +1033,7 @@ class ONMF_timeseries_reconstructor():
                        mode,
                        foldername,
                        data=None,
-                       reverse_data_in_time=False,
+                       sample_from_future2past=False,
                        ini_dict=None,
                        ini_A=None,
                        ini_B=None,
@@ -1043,7 +1043,7 @@ class ONMF_timeseries_reconstructor():
                        future_extraploation_length=0,
                        if_learn_online=True,
                        if_save=True,
-                       if_recons=True,  ### Reconstruct observed data using learned dictionary
+                       # if_recons=True,  ### Reconstruct observed data using learned dictionary
                        minibatch_training_initialization=False,
                        minibatch_alpha=1,
                        minibatch_beta=1,
@@ -1060,8 +1060,6 @@ class ONMF_timeseries_reconstructor():
         else:
             A = data.copy()
 
-        if reverse_data_in_time:
-            self.data = np.flip(A, axis=1).copy()  ### Reverse time axis
 
         # print('!!!!!!!!!! A.shape', A.shape)
 
@@ -1100,9 +1098,16 @@ class ONMF_timeseries_reconstructor():
             # iter = np.floor(A.shape[1]/self.num_patches_perbatch).astype(int)
             if online_learning:
                 for t in np.arange(k, A.shape[1]):
-                    a = np.maximum(0, t - self.num_patches_perbatch)
-                    X = self.extract_patches_interval(time_interval_initial=a,
-                                                      time_interval_terminal=t)  # get patch from the past
+                    if not sample_from_future2past:
+                        a = np.maximum(0, t - self.num_patches_perbatch)
+                        X = self.extract_patches_interval(time_interval_initial=a,
+                                                          time_interval_terminal=t)  # get patch from the past2future
+                    else:
+                        t1 = A.shape[1] - t
+                        a = np.minimum(A.shape[1], t1 + self.num_patches_perbatch)
+                        X = self.extract_patches_interval(time_interval_initial=t1,
+                                                          time_interval_terminal=a)  # get patch from the future2past
+
                     # print('X.shape', X.shape)
                     # X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
                     if t == k:
@@ -1121,11 +1126,11 @@ class ONMF_timeseries_reconstructor():
 
                         # prediction step
                         patch = A[:, t - k + L:t, :]
-                        if if_recons:
+                        if sample_from_future2past:
                             patch_recons = self.predict_joint_single(patch, a1)
                             A_recons = np.append(A_recons, patch_recons, axis=1)
                         else:
-                            A_recons = np.append(A_recons, patch, axis=1)
+                            A_recons = np.append(patch, A_recons, axis=1)
 
 
                     else:
@@ -1149,13 +1154,14 @@ class ONMF_timeseries_reconstructor():
                         # prediction step
                         patch = A[:, t - k + L:t, :]  ### in the original time orientation
 
-                        if if_recons:
+                        if sample_from_future2past:
                             patch_recons = self.predict_joint_single(patch, a1)
                             # print('patch_recons', patch_recons)
+                            A_recons = np.append(A_recons, patch_recons, axis=1)
                         else:
                             patch_recons = patch[:,-1,:]
                             patch_recons = patch_recons[:, np.newaxis, :]
-                        A_recons = np.append(A_recons, patch_recons, axis=1)
+                            A_recons = np.append(patch_recons, A_recons, axis=1)
 
                         # print('!!!!! A_recons.shape', A_recons.shape)
                     # print('!!!!!!!!!!!! A_recons.shape', A_recons.shape)
@@ -1208,14 +1214,12 @@ class ONMF_timeseries_reconstructor():
                 self.beta), Bt)
             np.save('Time_series_dictionary/' + str(foldername) + '/recons', A_recons)
 
-        if reverse_data_in_time:
-            self.data = np.flip(A, axis=1).copy()  ### Reverse back the time axis -- set it back to the original
-
         return A_full_predictions_trials, self.W, At, Bt, self.code
 
     def ONMF_predictor_historic(self,
                                 mode,
                                 foldername,
+                                sample_from_future2past=True,
                                 reverse_data_in_time=True,
                                 ini_dict=None,
                                 ini_A=None,
@@ -1225,7 +1229,6 @@ class ONMF_timeseries_reconstructor():
                                 a2=1,  # regularizer for the code in recursive prediction
                                 future_extraploation_length=0,
                                 if_save=True,
-                                if_recons=False,
                                 minibatch_training_initialization=False,
                                 minibatch_alpha=1,
                                 minibatch_beta=1,
@@ -1268,7 +1271,7 @@ class ONMF_timeseries_reconstructor():
                 A_recons, W, At, Bt, code = self.ONMF_predictor(mode,
                                                                 foldername,
                                                                 data=A1,
-                                                                reverse_data_in_time=reverse_data_in_time,
+                                                                sample_from_future2past=sample_from_future2past,
                                                                 ini_dict=ini_dict,
                                                                 ini_A=ini_A,
                                                                 ini_B=ini_B,
@@ -1279,7 +1282,6 @@ class ONMF_timeseries_reconstructor():
                                                                 # regularizer for the code in recursive prediction
                                                                 future_extraploation_length=future_extraploation_length,
                                                                 if_save=True,
-                                                                if_recons=if_recons,
                                                                 minibatch_training_initialization=minibatch_training_initialization,
                                                                 minibatch_alpha=minibatch_alpha,
                                                                 minibatch_beta=minibatch_beta,
