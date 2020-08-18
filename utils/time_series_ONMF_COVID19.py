@@ -1033,6 +1033,7 @@ class ONMF_timeseries_reconstructor():
                        mode,
                        foldername,
                        data=None,
+                       reverse_data_in_time=False,
                        ini_dict=None,
                        ini_A=None,
                        ini_B=None,
@@ -1047,6 +1048,7 @@ class ONMF_timeseries_reconstructor():
                        minibatch_alpha=1,
                        minibatch_beta=1,
                        print_iter=False,
+                       online_learning = True,
                        num_trials=1):
         print('online learning and predicting from patches along mode %i...' % mode)
         '''
@@ -1054,9 +1056,12 @@ class ONMF_timeseries_reconstructor():
         Predict forthcoming data on the fly. This could be made to affect learning rate 
         '''
         if data is None:
-            A = self.data
+            A = self.data.copy()
         else:
-            A = data
+            A = data.copy()
+
+        if reverse_data_in_time:
+            self.data = np.flip(A, axis=1).copy()  ### Reverse time axis
 
         # print('!!!!!!!!!! A.shape', A.shape)
 
@@ -1093,70 +1098,80 @@ class ONMF_timeseries_reconstructor():
 
             # print('data.shape', self.data.shape)
             # iter = np.floor(A.shape[1]/self.num_patches_perbatch).astype(int)
-            for t in np.arange(k, A.shape[1]):
-                a = np.maximum(0, t - self.num_patches_perbatch)
-                X = self.extract_patches_interval(time_interval_initial=a,
-                                                  time_interval_terminal=t)  # get patch from the past
-                # print('X.shape', X.shape)
-                # X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
-                if t == k:
-                    self.ntf = Online_NTF(X, self.n_components,
-                                          iterations=self.ONMF_sub_iterations,
-                                          learn_joint_dict=True,
-                                          mode=mode,
-                                          ini_dict=self.W,
-                                          ini_A=ini_A,
-                                          ini_B=ini_B,
-                                          batch_size=self.ONMF_batch_size,
-                                          subsample=self.subsample,
-                                          beta=beta)
-                    self.W, At, Bt, H = self.ntf.train_dict_single()
-                    self.code += H
-
-                    # prediction step
-                    patch = A[:, t - k + L:t, :]
-                    if if_recons:
-                        patch_recons = self.predict_joint_single(patch, a1)
-                        # print('patch_recons', patch_recons)
-                        A_recons = np.append(A_recons, patch_recons, axis=1)
-                    else:
-                        A_recons = np.append(A_recons, patch, axis=1)
-
-
-                else:
-                    if t % self.learnevery == 0 and if_learn_online:  # do not learn from zero data (make np.sum(X)>0 for online learning)
+            if online_learning:
+                for t in np.arange(k, A.shape[1]):
+                    a = np.maximum(0, t - self.num_patches_perbatch)
+                    X = self.extract_patches_interval(time_interval_initial=a,
+                                                      time_interval_terminal=t)  # get patch from the past
+                    # print('X.shape', X.shape)
+                    # X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
+                    if t == k:
                         self.ntf = Online_NTF(X, self.n_components,
                                               iterations=self.ONMF_sub_iterations,
-                                              batch_size=self.ONMF_batch_size,
-                                              ini_dict=self.W,
-                                              ini_A=At,
-                                              ini_B=Bt,
                                               learn_joint_dict=True,
                                               mode=mode,
-                                              history=self.ntf.history,
+                                              ini_dict=self.W,
+                                              ini_A=ini_A,
+                                              ini_B=ini_B,
+                                              batch_size=self.ONMF_batch_size,
                                               subsample=self.subsample,
                                               beta=beta)
-
                         self.W, At, Bt, H = self.ntf.train_dict_single()
-                        # print('dictionary_updated')
                         self.code += H
 
-                    # prediction step
-                    patch = A[:, t - k + L:t, :]
-                    if if_recons:
-                        patch_recons = self.predict_joint_single(patch, a1)
-                        # print('patch_recons', patch_recons)
-                        A_recons = np.append(A_recons, patch_recons, axis=1)
-                    else:
-                        A_recons = np.append(A_recons, patch, axis=1)
+                        # prediction step
+                        patch = A[:, t - k + L:t, :]
+                        if if_recons:
+                            patch_recons = self.predict_joint_single(patch, a1)
+                            A_recons = np.append(A_recons, patch_recons, axis=1)
+                        else:
+                            A_recons = np.append(A_recons, patch, axis=1)
 
+
+                    else:
+                        if t % self.learnevery == 0 and if_learn_online:  # do not learn from zero data (make np.sum(X)>0 for online learning)
+                            self.ntf = Online_NTF(X, self.n_components,
+                                                  iterations=self.ONMF_sub_iterations,
+                                                  batch_size=self.ONMF_batch_size,
+                                                  ini_dict=self.W,
+                                                  ini_A=At,
+                                                  ini_B=Bt,
+                                                  learn_joint_dict=True,
+                                                  mode=mode,
+                                                  history=self.ntf.history,
+                                                  subsample=self.subsample,
+                                                  beta=beta)
+
+                            self.W, At, Bt, H = self.ntf.train_dict_single()
+                            # print('dictionary_updated')
+                            self.code += H
+
+                        # prediction step
+                        patch = A[:, t - k + L:t, :]  ### in the original time orientation
+
+                        if if_recons:
+                            patch_recons = self.predict_joint_single(patch, a1)
+                            # print('patch_recons', patch_recons)
+                        else:
+                            patch_recons = patch[:,-1,:]
+                            patch_recons = patch_recons[:, np.newaxis, :]
+                        A_recons = np.append(A_recons, patch_recons, axis=1)
+
+                        # print('!!!!! A_recons.shape', A_recons.shape)
                     # print('!!!!!!!!!!!! A_recons.shape', A_recons.shape)
-            if print_iter:
-                print('Current (trial, day) for ONMF_predictor (%i, %i) out of (%i, %i)' % (
-                    trial, t, num_trials, A.shape[1] - 1))
+                    if print_iter:
+                        print('Current (trial, day) for ONMF_predictor (%i, %i) out of (%i, %i)' % (
+                            trial, t, num_trials, A.shape[1] - 1))
+
+                    # print('!!!!! A_recons.shape', A_recons.shape)
             # forward recursive prediction begins
+
             for t in np.arange(A.shape[1], A.shape[1] + future_extraploation_length):
+                # print('!!!!! A_recons.shape', A_recons.shape)
+                # print('!!!!! A.shape', A.shape)
+
                 patch = A_recons[:, t - k + L:t, :]
+                # print('!!!!! patch.shape', patch.shape)
                 patch_recons = self.predict_joint_single(patch, a2)
                 A_recons = np.append(A_recons, patch_recons, axis=1)
             print('new cases predicted final', A_recons[0, -1, 0])
@@ -1166,7 +1181,7 @@ class ONMF_timeseries_reconstructor():
             ### patch the two reconstructions
             # A_recons = np.append(A_recons, A_recons[:,A.shape[1]:, :], axis=1)
 
-            print('!!!!! A_recons', A_recons.shape)
+            # print('!!!!! A_recons', A_recons.shape)
 
             list_full_predictions.append(A_recons.copy())
 
@@ -1192,11 +1207,16 @@ class ONMF_timeseries_reconstructor():
             np.save('Time_series_dictionary/' + str(foldername) + '/Bt_' + str(list[0]) + '_' + 'afteronline' + str(
                 self.beta), Bt)
             np.save('Time_series_dictionary/' + str(foldername) + '/recons', A_recons)
+
+        if reverse_data_in_time:
+            self.data = np.flip(A, axis=1).copy()  ### Reverse back the time axis -- set it back to the original
+
         return A_full_predictions_trials, self.W, At, Bt, self.code
 
     def ONMF_predictor_historic(self,
                                 mode,
                                 foldername,
+                                reverse_data_in_time=True,
                                 ini_dict=None,
                                 ini_A=None,
                                 ini_B=None,
@@ -1205,9 +1225,11 @@ class ONMF_timeseries_reconstructor():
                                 a2=1,  # regularizer for the code in recursive prediction
                                 future_extraploation_length=0,
                                 if_save=True,
+                                if_recons=False,
                                 minibatch_training_initialization=False,
                                 minibatch_alpha=1,
                                 minibatch_beta=1,
+                                online_learning=True,
                                 num_trials=1):  # take a number of trials to generate empirical confidence interval
 
         print('Running ONMF_timeseries_predictor_historic along mode %i...' % mode)
@@ -1246,6 +1268,7 @@ class ONMF_timeseries_reconstructor():
                 A_recons, W, At, Bt, code = self.ONMF_predictor(mode,
                                                                 foldername,
                                                                 data=A1,
+                                                                reverse_data_in_time=reverse_data_in_time,
                                                                 ini_dict=ini_dict,
                                                                 ini_A=ini_A,
                                                                 ini_B=ini_B,
@@ -1256,11 +1279,12 @@ class ONMF_timeseries_reconstructor():
                                                                 # regularizer for the code in recursive prediction
                                                                 future_extraploation_length=future_extraploation_length,
                                                                 if_save=True,
-                                                                if_recons=False,
+                                                                if_recons=if_recons,
                                                                 minibatch_training_initialization=minibatch_training_initialization,
                                                                 minibatch_alpha=minibatch_alpha,
                                                                 minibatch_beta=minibatch_beta,
                                                                 print_iter=False,
+                                                                online_learning=online_learning,
                                                                 num_trials=1)
                 A_recons = A_recons[0, :, :, :]
                 # print('!!!! A_recons.shape', A_recons.shape)
@@ -1343,7 +1367,7 @@ class ONMF_timeseries_reconstructor():
 
         # now paint the reconstruction canvas
         # only add the last predicted value
-        A_recons = patch_recons[:, k - 1, :]
+        A_recons = patch_recons[:,  -1, :]
         return A_recons[:, np.newaxis, :]
 
 

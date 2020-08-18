@@ -23,8 +23,8 @@ def main_train_joint():
     n_components = 16
 
     # country_list = ['Korea, South', 'China', 'US', 'Italy', 'Germany', 'Spain']
-    # state_list = ['California', 'New York']
-    state_list = ['California', 'Florida', 'Texas', 'New York']
+    state_list = ['California']
+    # state_list = ['California', 'Florida', 'Texas', 'New York']
     # state_list = ['CA', 'FL', 'TX', 'NY']
     # country_list = ['Russia', 'Brazil']
 
@@ -34,8 +34,8 @@ def main_train_joint():
     data_source = data_source_list[1]
     if_train_fresh = True
     if_display_dict = False
-    if_recons = True
-    if_ONMF_timeseris_predictor_historic = False
+    if_recons = False
+    if_ONMF_timeseris_predictor_historic = True
     L = 60  ## prediction length
     num_trials = 1
 
@@ -69,6 +69,7 @@ def main_train_joint():
     if if_recons:
         ### Online dictionary learning and prediction
         A_recons, W1, At1, Bt1, H = reconstructor.ONMF_predictor(mode=3,
+                                                                 reverse_data_in_time=True,
                                                                  ini_dict=None,
                                                                  foldername=foldername,
                                                                  beta=4,
@@ -96,6 +97,7 @@ def main_train_joint():
 
         A_full_predictions_trials, W, code = reconstructor.ONMF_predictor_historic(mode=3,
                                                                                    foldername=foldername,
+                                                                                   reverse_data_in_time=True,
                                                                                    ini_dict=None,
                                                                                    ini_A=None,
                                                                                    ini_B=None,
@@ -195,4 +197,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
