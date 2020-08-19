@@ -15,18 +15,17 @@ def main_train_joint():
     path_COVID_tracking_proj = "Data/us_states_COVID_tracking_project.csv"
     # path_NYT_data  = "Data/NYT_us-states.csv"
 
-    foldername = 'test3'  ## for saving files
+    foldername = 'test_transfer'  ## for saving files
     # source = [path_confirmed, path_deaths, path_recovered]
     # source = [path_confirmed, path_deaths, path_recovered]
     source = [path_COVIDactnow]
 
     n_components = 16
 
-    state_list_1 = ['California']  ### List of states for learning dictionary from
-    state_list_2 = ['New York']  ### List of states for transfer-prediction
+    state_list_train = ['New York']  ### List of states for learning dictionary from
+    state_list_test = ['California']  ### List of states for transfer-prediction
 
     # state_list = ['California', 'Florida', 'Texas', 'New York']
-
 
     data_source_list = ['COVID_ACT_NOW', 'COVID_TRACKING_PROJECT', 'JHU']
     data_source = data_source_list[1]
@@ -37,128 +36,152 @@ def main_train_joint():
     L = 60  ## prediction length
     num_trials = 1
 
-
-    ### Set up reconstructor class for the training set
-    reconstructor_train = ONMF_timeseries_reconstructor(path=path_COVID_tracking_proj,
-                                                  source=source,
-                                                  data_source=data_source,
-                                                  country_list=None,
-                                                  state_list=state_list_1,
-                                                  alpha=3,  # L1 sparsity regularizer for minibatch and online learning
-                                                  beta=1,  # default learning exponent --
-                                                  # customized in both trianing and online prediction functions
-                                                  # learning rate exponent in online learning -- smaller weighs new data more
-                                                  n_components=n_components,  # number of dictionary elements -- rank
-                                                  ONMF_iterations=50,  # number of iterations for the ONTF algorithm
-                                                  ONMF_sub_iterations=2,
-                                                  # number of i.i.d. subsampling for each iteration of ONTF
-                                                  ONMF_batch_size=50,  # number of patches used in i.i.d. subsampling
-                                                  num_patches_perbatch=100,
-                                                  # number of patches per ONMF iteration (size of mini batch)
-                                                  # number of patches that ONTF algorithm learns from at each iteration
-                                                  patch_size=6,
-                                                  prediction_length=1,
-                                                  learnevery=1,
-                                                  subsample=False,
-                                                  if_onlynewcases=True,
-                                                  # take the derivate of the time-series of total to get new cases
-                                                  if_moving_avg_data=False,
-                                                  if_log_scale=True)
-
-    ### Online dictionary learning and prediction
-    A_recons, W1, At1, Bt1, H = reconstructor_train.ONMF_predictor(mode=3,
-                                                             ini_dict=None,
-                                                             foldername=foldername,
-                                                             beta=4,
-                                                             # no effect if "if_learn_online" is false
-                                                             ini_A=None,
-                                                             ini_B=None,
-                                                             a1=0,
-                                                             # regularizer for training
-                                                             a2=0,
-                                                             # regularizer for prediction
-                                                             future_extraploation_length=L,
-                                                             if_learn_online=True,
-                                                             if_save=True,
-                                                             if_recons=False,
-                                                             minibatch_training_initialization=True,
-                                                             minibatch_alpha=3,
-                                                             minibatch_beta=1,
-                                                             print_iter=True,
-                                                             online_learning=True,
-                                                             num_trials=num_trials)
-
-    print('A_recons.shape', A_recons.shape)
-    print('A_recons', A_recons)
-
-
     ### Set up reconstructor class for the test set
-    reconstructor_test = ONMF_timeseries_reconstructor(path=path_COVID_tracking_proj,
-                                                  source=source,
-                                                  data_source=data_source,
-                                                  country_list=None,
-                                                  state_list=state_list_2,
-                                                  alpha=3,  # L1 sparsity regularizer for minibatch and online learning
-                                                  beta=1,  # default learning exponent --
-                                                  # customized in both trianing and online prediction functions
-                                                  # learning rate exponent in online learning -- smaller weighs new data more
-                                                  n_components=n_components,  # number of dictionary elements -- rank
-                                                  ONMF_iterations=50,  # number of iterations for the ONTF algorithm
-                                                  ONMF_sub_iterations=2,
-                                                  # number of i.i.d. subsampling for each iteration of ONTF
-                                                  ONMF_batch_size=50,  # number of patches used in i.i.d. subsampling
-                                                  num_patches_perbatch=100,
-                                                  # number of patches per ONMF iteration (size of mini batch)
-                                                  # number of patches that ONTF algorithm learns from at each iteration
-                                                  patch_size=6,
-                                                  prediction_length=1,
-                                                  learnevery=1,
-                                                  subsample=False,
-                                                  if_onlynewcases=True,
-                                                  # take the derivate of the time-series of total to get new cases
-                                                  if_moving_avg_data=False,
-                                                  if_log_scale=True)
+    reconstructor_transfer = ONMF_timeseries_reconstructor(path=path_COVID_tracking_proj,
+                                                           source=source,
+                                                           data_source=data_source,
+                                                           country_list=None,
+                                                           state_list=state_list_test,
+                                                           state_list_train=state_list_train,
+                                                           alpha=3,
+                                                           # L1 sparsity regularizer for minibatch and online learning
+                                                           beta=1,  # default learning exponent --
+                                                           # customized in both trianing and online prediction functions
+                                                           # learning rate exponent in online learning -- smaller weighs new data more
+                                                           n_components=n_components,
+                                                           # number of dictionary elements -- rank
+                                                           ONMF_iterations=50,
+                                                           # number of iterations for the ONTF algorithm
+                                                           ONMF_sub_iterations=2,
+                                                           # number of i.i.d. subsampling for each iteration of ONTF
+                                                           ONMF_batch_size=50,
+                                                           # number of patches used in i.i.d. subsampling
+                                                           num_patches_perbatch=100,
+                                                           # number of patches per ONMF iteration (size of mini batch)
+                                                           # number of patches that ONTF algorithm learns from at each iteration
+                                                           patch_size=6,
+                                                           prediction_length=1,
+                                                           learnevery=1,
+                                                           subsample=False,
+                                                           if_onlynewcases=True,
+                                                           # take the derivate of the time-series of total to get new cases
+                                                           if_moving_avg_data=False,
+                                                           if_log_scale=True)
 
     ### Run ONMF_prediction on the entire dataset for validation
-    if if_ONMF_predictor_historic:
+    # print('!!!! W1.shape', W1.shape)
+    # W2 = np.concatenate(np.vsplit(W1, len(state_list_train)), axis=1) # concatenate state-wise dictionary to predict one state
+    # print('!!!! W2.shape', W2.shape)
 
-        A_full_predictions_trials, W, code = reconstructor_test.ONMF_predictor_historic(mode=3,
-                                                                                   foldername=foldername,
-                                                                                   ini_dict=W1,
-                                                                                   ini_A=At1,
-                                                                                   ini_B=Bt1,
-                                                                                   beta=1,
-                                                                                   a1=0,
-                                                                                   # regularizer for the code in partial fitting
-                                                                                   a2=0,
-                                                                                   # regularizer for the code in recursive prediction
-                                                                                   future_extraploation_length=7,
-                                                                                   if_save=True,
-                                                                                   if_recons=False,
-                                                                                   minibatch_training_initialization=False,
-                                                                                   minibatch_alpha=1,
-                                                                                   minibatch_beta=1,
-                                                                                   online_learning=True,
-                                                                                   num_trials=num_trials)  # take a number of trials to generate empirical confidence interval
+    A_full_predictions_trials, W, code = reconstructor_transfer.ONMF_predictor_historic(mode=3,
+                                                                                        foldername=foldername,
+                                                                                        learn_from_future2past=True,
+                                                                                        learn_from_training_set=True,
+                                                                                        ini_dict=None,
+                                                                                        ini_A=None,
+                                                                                        ini_B=None,
+                                                                                        beta=1,
+                                                                                        a1=0,
+                                                                                        # regularizer for the code in partial fitting
+                                                                                        a2=0,
+                                                                                        # regularizer for the code in recursive prediction
+                                                                                        future_extraploation_length=7,
+                                                                                        if_save=True,
+                                                                                        minibatch_training_initialization=False,
+                                                                                        minibatch_alpha=1,
+                                                                                        minibatch_beta=1,
+                                                                                        online_learning=True,
+                                                                                        num_trials=num_trials)  # take a number of trials to generate empirical confidence interval
 
-        print('A_full_predictions_trials.shape', A_full_predictions_trials.shape)
-        print('A_full_predictions_trials', A_full_predictions_trials)
+    print('A_full_predictions_trials.shape', A_full_predictions_trials.shape)
+    print('A_full_predictions_trials', A_full_predictions_trials)
 
-        ### plot online-trained dictionary (from last iteration)
-        filename = "full_prediction_trials_" + state_list_2[0] + "_num_states_" + str(len(state_list_2))
+    ### plot online-trained dictionary (from last iteration)
 
-        for state in state_list_2:
-            reconstructor_test.display_dictionary_Hospital(W, state_name=state, if_show=True, if_save=True,
-                                                      foldername=foldername,
-                                                      filename='online_' + filename)
+    list_states_abb_train = [us_state_abbrev[state] for state in state_list_train]
+    list_train = '-'.join(list_states_abb_train)
 
-        ### plot original and prediction curves
+    list_states_abb_test = [us_state_abbrev[state] for state in state_list_test]
+    list_test = '-'.join(list_states_abb_test)
 
-        reconstructor_test.display_prediction_evaluation(A_full_predictions_trials[:, ], if_show=False, if_save=True,
-                                                    foldername=foldername,
-                                                    filename=filename, if_errorbar=True, if_evaluation=True)
+    filename = "full_prediction_trials_" + str(num_trials) + "_" + list_train + str(2) + list_test
 
-    np.save("Time_series_dictionary/full_result_" + str(data_source), reconstructor_test.result_dict)
+    for state in state_list_test:
+        reconstructor_transfer.display_dictionary_Hospital(W, state_name=state, if_show=True, if_save=True,
+                                                           foldername=foldername,
+                                                           filename='online_' + filename)
+
+    ### plot original and prediction curves
+
+    title = state_list_test[0] + " (" + "transfer prediction using dictionary learned from" + str(list_train) + ")"
+    reconstructor_transfer.display_prediction_evaluation(A_full_predictions_trials[:, ], if_show=False, if_save=True,
+                                                         foldername=foldername,
+                                                         filename=filename, if_errorbar=True, if_evaluation=True,
+                                                         title=title)
+
+    np.save("Time_series_dictionary/full_result_" + str(data_source), reconstructor_transfer.result_dict)
+
+
+us_state_abbrev = {
+    'Alabama': 'AL',
+    'Alaska': 'AK',
+    'American Samoa': 'AS',
+    'Arizona': 'AZ',
+    'Arkansas': 'AR',
+    'California': 'CA',
+    'Colorado': 'CO',
+    'Connecticut': 'CT',
+    'Delaware': 'DE',
+    'District of Columbia': 'DC',
+    'Florida': 'FL',
+    'Georgia': 'GA',
+    'Guam': 'GU',
+    'Hawaii': 'HI',
+    'Idaho': 'ID',
+    'Illinois': 'IL',
+    'Indiana': 'IN',
+    'Iowa': 'IA',
+    'Kansas': 'KS',
+    'Kentucky': 'KY',
+    'Louisiana': 'LA',
+    'Maine': 'ME',
+    'Maryland': 'MD',
+    'Massachusetts': 'MA',
+    'Michigan': 'MI',
+    'Minnesota': 'MN',
+    'Mississippi': 'MS',
+    'Missouri': 'MO',
+    'Montana': 'MT',
+    'Nebraska': 'NE',
+    'Nevada': 'NV',
+    'New Hampshire': 'NH',
+    'New Jersey': 'NJ',
+    'New Mexico': 'NM',
+    'New York': 'NY',
+    'North Carolina': 'NC',
+    'North Dakota': 'ND',
+    'Northern Mariana Islands': 'MP',
+    'Ohio': 'OH',
+    'Oklahoma': 'OK',
+    'Oregon': 'OR',
+    'Pennsylvania': 'PA',
+    'Puerto Rico': 'PR',
+    'Rhode Island': 'RI',
+    'South Carolina': 'SC',
+    'South Dakota': 'SD',
+    'Tennessee': 'TN',
+    'Texas': 'TX',
+    'Utah': 'UT',
+    'Vermont': 'VT',
+    'Virgin Islands': 'VI',
+    'Virginia': 'VA',
+    'Washington': 'WA',
+    'West Virginia': 'WV',
+    'Wisconsin': 'WI',
+    'Wyoming': 'WY'
+}
+
+abbrev_us_state = dict(map(reversed, us_state_abbrev.items()))
 
 
 def main():
@@ -167,4 +190,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

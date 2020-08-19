@@ -23,8 +23,8 @@ def main_train_joint():
     n_components = 16
 
     # country_list = ['Korea, South', 'China', 'US', 'Italy', 'Germany', 'Spain']
-    state_list = ['California']
-    # state_list = ['California', 'Florida', 'Texas', 'New York']
+    # state_list = ['California']
+    state_list = ['California', 'Florida', 'Texas', 'New York']
     # state_list = ['CA', 'FL', 'TX', 'NY']
     # country_list = ['Russia', 'Brazil']
 
@@ -37,7 +37,7 @@ def main_train_joint():
     if_recons = False
     if_ONMF_timeseris_predictor_historic = True
     L = 60  ## prediction length
-    num_trials = 1
+    num_trials = 3
 
     reconstructor = ONMF_timeseries_reconstructor(path=path_COVID_tracking_proj,
                                                   source=source,
@@ -56,7 +56,7 @@ def main_train_joint():
                                                   num_patches_perbatch=100,
                                                   # number of patches per ONMF iteration (size of mini batch)
                                                   # number of patches that ONTF algorithm learns from at each iteration
-                                                  patch_size=6,
+                                                  patch_size=10,
                                                   prediction_length=1,
                                                   learnevery=1,
                                                   subsample=False,
@@ -69,7 +69,7 @@ def main_train_joint():
     if if_recons:
         ### Online dictionary learning and prediction
         A_recons, W1, At1, Bt1, H = reconstructor.ONMF_predictor(mode=3,
-                                                                 sample_from_future2past=True,
+                                                                 learn_from_future2past=True,
                                                                  ini_dict=None,
                                                                  foldername=foldername,
                                                                  beta=4,
@@ -97,7 +97,7 @@ def main_train_joint():
 
         A_full_predictions_trials, W, code = reconstructor.ONMF_predictor_historic(mode=3,
                                                                                    foldername=foldername,
-                                                                                   sample_from_future2past=True,
+                                                                                   learn_from_future2past=True,
                                                                                    ini_dict=None,
                                                                                    ini_A=None,
                                                                                    ini_B=None,
@@ -116,8 +116,11 @@ def main_train_joint():
         print('A_full_predictions_trials.shape', A_full_predictions_trials.shape)
         print('A_full_predictions_trials', A_full_predictions_trials)
 
+        list_states_abb = [us_state_abbrev[state] for state in state_list]
+        list_states_abb = '-'.join(list_states_abb)
+
         ### plot online-trained dictionary (from last iteration)
-        filename = "full_prediction_trials_" + state_list[0] + "_num_states_" + str(len(state_list))
+        filename = "full_prediction_trials_" + str(num_trials) + "_" + list_states_abb
 
         for state in state_list:
             reconstructor.display_dictionary_Hospital(W, state_name=state, if_show=True, if_save=True,
@@ -128,7 +131,7 @@ def main_train_joint():
 
         reconstructor.display_prediction_evaluation(A_full_predictions_trials[:, ], if_show=False, if_save=True,
                                                     foldername=foldername,
-                                                    filename=filename, if_errorbar=True, if_evaluation=True)
+                                                    filename=filename, if_errorbar=True, if_evaluation=True, title=None)
 
     np.save("Time_series_dictionary/full_result_" + str(data_source), reconstructor.result_dict)
 
@@ -188,7 +191,69 @@ def main_train_joint():
         ### plot original and prediction curves
         # filename = 'single'
         reconstructor.display_prediction_evaluation(A_recons, if_show=True, if_save=True, foldername=foldername,
-                                                         filename=filename, if_errorbar=True)
+                                                    filename=filename, if_errorbar=True)
+
+
+us_state_abbrev = {
+    'Alabama': 'AL',
+    'Alaska': 'AK',
+    'American Samoa': 'AS',
+    'Arizona': 'AZ',
+    'Arkansas': 'AR',
+    'California': 'CA',
+    'Colorado': 'CO',
+    'Connecticut': 'CT',
+    'Delaware': 'DE',
+    'District of Columbia': 'DC',
+    'Florida': 'FL',
+    'Georgia': 'GA',
+    'Guam': 'GU',
+    'Hawaii': 'HI',
+    'Idaho': 'ID',
+    'Illinois': 'IL',
+    'Indiana': 'IN',
+    'Iowa': 'IA',
+    'Kansas': 'KS',
+    'Kentucky': 'KY',
+    'Louisiana': 'LA',
+    'Maine': 'ME',
+    'Maryland': 'MD',
+    'Massachusetts': 'MA',
+    'Michigan': 'MI',
+    'Minnesota': 'MN',
+    'Mississippi': 'MS',
+    'Missouri': 'MO',
+    'Montana': 'MT',
+    'Nebraska': 'NE',
+    'Nevada': 'NV',
+    'New Hampshire': 'NH',
+    'New Jersey': 'NJ',
+    'New Mexico': 'NM',
+    'New York': 'NY',
+    'North Carolina': 'NC',
+    'North Dakota': 'ND',
+    'Northern Mariana Islands': 'MP',
+    'Ohio': 'OH',
+    'Oklahoma': 'OK',
+    'Oregon': 'OR',
+    'Pennsylvania': 'PA',
+    'Puerto Rico': 'PR',
+    'Rhode Island': 'RI',
+    'South Carolina': 'SC',
+    'South Dakota': 'SD',
+    'Tennessee': 'TN',
+    'Texas': 'TX',
+    'Utah': 'UT',
+    'Vermont': 'VT',
+    'Virgin Islands': 'VI',
+    'Virginia': 'VA',
+    'Washington': 'WA',
+    'West Virginia': 'WV',
+    'Wisconsin': 'WI',
+    'Wyoming': 'WY'
+}
+
+abbrev_us_state = dict(map(reversed, us_state_abbrev.items()))
 
 
 def main():
@@ -197,3 +262,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
