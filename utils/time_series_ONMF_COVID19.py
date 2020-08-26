@@ -1115,7 +1115,7 @@ class ONMF_timeseries_reconstructor():
                     t1 = A.shape[1] - t
                     a = np.minimum(A.shape[1], t1 + self.num_patches_perbatch)
                     X = self.extract_patches_interval(time_interval_initial=t1,
-                                                      time_interval_terminal=a)  # get patch from the future2past
+                                                      time_interval_terminal=a)
 
                     # print('X.shape', X.shape)
                     # X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
