@@ -1045,7 +1045,6 @@ class ONMF_timeseries_reconstructor():
                        mode,
                        foldername,
                        data=None,
-                       learn_from_future2past=False,
                        learn_from_training_set=False,
                        ini_dict=None,
                        ini_A=None,
@@ -1113,15 +1112,10 @@ class ONMF_timeseries_reconstructor():
             # iter = np.floor(A.shape[1]/self.num_patches_perbatch).astype(int)
             if online_learning:
                 for t in np.arange(k, A.shape[1]):
-                    if not learn_from_future2past:
-                        a = np.maximum(0, t - self.num_patches_perbatch)
-                        X = self.extract_patches_interval(time_interval_initial=a,
-                                                          time_interval_terminal=t)  # get patch from the past2future
-                    else:
-                        t1 = A.shape[1] - t
-                        a = np.minimum(A.shape[1], t1 + self.num_patches_perbatch)
-                        X = self.extract_patches_interval(time_interval_initial=t1,
-                                                          time_interval_terminal=a)  # get patch from the future2past
+                    t1 = A.shape[1] - t
+                    a = np.minimum(A.shape[1], t1 + self.num_patches_perbatch)
+                    X = self.extract_patches_interval(time_interval_initial=t1,
+                                                      time_interval_terminal=a)  # get patch from the future2past
 
                     # print('X.shape', X.shape)
                     # X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
@@ -1141,11 +1135,7 @@ class ONMF_timeseries_reconstructor():
 
                         # prediction step
                         patch = A[:, t - k + L:t, :]
-                        if learn_from_future2past:
-                            patch_recons = self.predict_joint_single(patch, a1)
-                            A_recons = np.append(A_recons, patch_recons, axis=1)
-                        else:
-                            A_recons = np.append(patch, A_recons, axis=1)
+                        A_recons = np.append(patch, A_recons, axis=1)
 
 
                     else:
@@ -1168,15 +1158,9 @@ class ONMF_timeseries_reconstructor():
 
                         # prediction step
                         patch = A[:, t - k + L:t, :]  ### in the original time orientation
-
-                        if learn_from_future2past:
-                            patch_recons = self.predict_joint_single(patch, a1)
-                            # print('patch_recons', patch_recons)
-                            A_recons = np.append(A_recons, patch_recons, axis=1)
-                        else:
-                            patch_recons = patch[:, -1, :]
-                            patch_recons = patch_recons[:, np.newaxis, :]
-                            A_recons = np.append(patch_recons, A_recons, axis=1)
+                        patch_recons = patch[:, -1, :]
+                        patch_recons = patch_recons[:, np.newaxis, :]
+                        A_recons = np.append(patch_recons, A_recons, axis=1)
 
                         # print('!!!!! A_recons.shape', A_recons.shape)
                     # print('!!!!!!!!!!!! A_recons.shape', A_recons.shape)
@@ -1239,7 +1223,6 @@ class ONMF_timeseries_reconstructor():
     def ONMF_predictor_historic(self,
                                 mode,
                                 foldername,
-                                learn_from_future2past=True,
                                 learn_from_training_set=False,
                                 reverse_data_in_time=True,
                                 ini_dict=None,
@@ -1292,7 +1275,6 @@ class ONMF_timeseries_reconstructor():
                 A_recons, W, At, Bt, code = self.ONMF_predictor(mode,
                                                                 foldername,
                                                                 data=A1,
-                                                                learn_from_future2past=learn_from_future2past,
                                                                 ini_dict=ini_dict,
                                                                 ini_A=ini_A,
                                                                 ini_B=ini_B,

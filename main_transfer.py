@@ -75,7 +75,6 @@ def main_train_joint():
 
     A_full_predictions_trials, W, code = reconstructor_transfer.ONMF_predictor_historic(mode=3,
                                                                                         foldername=foldername,
-                                                                                        learn_from_future2past=True,
                                                                                         learn_from_training_set=True,
                                                                                         ini_dict=None,
                                                                                         ini_A=None,
