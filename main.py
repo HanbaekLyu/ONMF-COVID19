@@ -69,6 +69,7 @@ def main_train_joint():
     if if_recons:
         ### Online dictionary learning and prediction
         A_recons, W1, At1, Bt1, H = reconstructor.ONMF_predictor(mode=3,
+                                                                 learn_from_future2past=True,
                                                                  ini_dict=None,
                                                                  foldername=foldername,
                                                                  beta=4,
@@ -96,6 +97,7 @@ def main_train_joint():
 
         A_full_predictions_trials, W, code = reconstructor.ONMF_predictor_historic(mode=3,
                                                                                    foldername=foldername,
+                                                                                   learn_from_future2past=True,
                                                                                    ini_dict=None,
                                                                                    ini_A=None,
                                                                                    ini_B=None,
