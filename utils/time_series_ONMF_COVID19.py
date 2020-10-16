@@ -26,11 +26,12 @@ class ONMF_timeseries_reconstructor():
                  ONMF_sub_iterations=20,  # number of i.i.d. subsampling for each iteration of ONTF
                  ONMF_batch_size=20,  # number of patches used in i.i.d. subsampling
                  num_patches_perbatch=1000,  # number of patches that ONTF algorithm learns from at each iteration
-                 patch_size=7,
+                 patch_size=7,  # length of sliding window
                  patches_file='',
                  learn_joint_dict=False,
                  prediction_length=1,
                  learnevery=5,
+                 learning_window_cap=None,  # if not none, learn from the past "learning_window_cap" days to predict
                  alpha=None,
                  beta=None,
                  subsample=False,
@@ -68,6 +69,7 @@ class ONMF_timeseries_reconstructor():
         self.input_variable_list = []
         self.result_dict = {}
         self.state_list_train = state_list_train
+        self.learning_window_cap = learning_window_cap
 
         input_variable_list = []
 
@@ -1047,16 +1049,18 @@ class ONMF_timeseries_reconstructor():
                        data=None,
                        learn_from_future2past=False,
                        learn_from_training_set=False,
+                       prelearned_dict = None, # if not none, use this dictionary for prediction
                        ini_dict=None,
                        ini_A=None,
                        ini_B=None,
                        beta=1,
-                       a1=1,  # regularizer for the code in partial fitting
-                       a2=1,  # regularizer for the code in recursive prediction
-                       future_extraploation_length=0,
+                       a1=0,  # regularizer for the code in partial fitting
+                       a2=0,  # regularizer for the code in recursive prediction
+                       future_extrapolation_length=0,
                        if_learn_online=True,
                        if_save=True,
-                       # if_recons=True,  ### Reconstruct observed data using learned dictionary
+                       # if_recons=True,  # Reconstruct observed data using learned dictionary
+                       learning_window_cap = None, # if not none, learn only from the past "learning_window_cap" days
                        minibatch_training_initialization=False,
                        minibatch_alpha=1,
                        minibatch_beta=1,
@@ -1077,6 +1081,9 @@ class ONMF_timeseries_reconstructor():
             A_test = A.copy()
             A = self.data_train[:, A_test.shape[1], :]
 
+        if learning_window_cap is None:
+            learning_window_cap = self.learning_window_cap
+
         # print('!!!!!!!!!! A.shape', A.shape)
 
         k = self.patch_size  # Window length
@@ -1091,109 +1098,121 @@ class ONMF_timeseries_reconstructor():
         # A_recons = np.zeros(shape=(A.shape[0], k+L-1, A.shape[2]))
 
         list_full_predictions = []
+        A_recons = A.copy()
+
         for trial in np.arange(num_trials):
             ### Initialize self parameters
             self.W = ini_dict
-            A_recons = A[:, 0:k + L - 1, :]
+            # A_recons = A[:, 0:k + L - 1, :]
             At = []
             Bt = []
 
-            if minibatch_training_initialization:
-                # print('!!! self.W right before minibatch training', self.W)
-                self.W, At, Bt, H = self.train_dict(mode=3,
-                                                    alpha=minibatch_alpha,
-                                                    beta=minibatch_beta,
-                                                    iterations=self.ONMF_iterations,
-                                                    learn_joint_dict=True,
-                                                    foldername=None,
-                                                    update_self=True,
-                                                    if_save=False)
+            if prelearned_dict is not None:
+                self.W = prelearned_dict
+            else:
+                # Learn new dictionary to use for prediction
+                if minibatch_training_initialization:
+                    # print('!!! self.W right before minibatch training', self.W)
+                    self.W, At, Bt, H = self.train_dict(mode=3,
+                                                        alpha=minibatch_alpha,
+                                                        beta=minibatch_beta,
+                                                        iterations=self.ONMF_iterations,
+                                                        learn_joint_dict=True,
+                                                        foldername=None,
+                                                        update_self=True,
+                                                        if_save=False)
 
-            # print('data.shape', self.data.shape)
-            # iter = np.floor(A.shape[1]/self.num_patches_perbatch).astype(int)
-            if online_learning:
-                for t in np.arange(k, A.shape[1]):
-                    if not learn_from_future2past:
-                        a = np.maximum(0, t - self.num_patches_perbatch)
-                        X = self.extract_patches_interval(time_interval_initial=a,
-                                                          time_interval_terminal=t)  # get patch from the past2future
-                    else:
-                        t1 = A.shape[1] - t
-                        a = np.minimum(A.shape[1], t1 + self.num_patches_perbatch)
-                        X = self.extract_patches_interval(time_interval_initial=t1,
-                                                          time_interval_terminal=a)  # get patch from the future2past
+                # print('data.shape', self.data.shape)
+                # iter = np.floor(A.shape[1]/self.num_patches_perbatch).astype(int)
+                if online_learning:
+                    T_start = k
+                    if learning_window_cap is not None:
+                        T_start = max(k, A.shape[1]-learning_window_cap)
 
-                    # print('X.shape', X.shape)
-                    # X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
-                    if t == k:
-                        self.ntf = Online_NTF(X, self.n_components,
-                                              iterations=self.ONMF_sub_iterations,
-                                              learn_joint_dict=True,
-                                              mode=mode,
-                                              ini_dict=self.W,
-                                              ini_A=ini_A,
-                                              ini_B=ini_B,
-                                              batch_size=self.ONMF_batch_size,
-                                              subsample=self.subsample,
-                                              beta=beta)
-                        self.W, At, Bt, H = self.ntf.train_dict_single()
-                        self.code += H
-
-                        # prediction step
-                        patch = A[:, t - k + L:t, :]
-                        if learn_from_future2past:
-                            patch_recons = self.predict_joint_single(patch, a1)
-                            A_recons = np.append(A_recons, patch_recons, axis=1)
+                    for t in np.arange(T_start, A.shape[1]):
+                        if not learn_from_future2past:
+                            a = np.maximum(0, t - self.num_patches_perbatch)
+                            X = self.extract_patches_interval(time_interval_initial=a,
+                                                              time_interval_terminal=t)  # get patch from the past2future
                         else:
-                            A_recons = np.append(patch, A_recons, axis=1)
+                            t1 = A.shape[1] - t
+                            a = np.minimum(A.shape[1], t1 + self.num_patches_perbatch)
+                            X = self.extract_patches_interval(time_interval_initial=t1,
+                                                              time_interval_terminal=a)  # get patch from the future2past
 
-
-                    else:
-                        if t % self.learnevery == 0 and if_learn_online:  # do not learn from zero data (make np.sum(X)>0 for online learning)
+                        # print('X.shape', X.shape)
+                        # X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
+                        if t == k:
                             self.ntf = Online_NTF(X, self.n_components,
                                                   iterations=self.ONMF_sub_iterations,
-                                                  batch_size=self.ONMF_batch_size,
-                                                  ini_dict=self.W,
-                                                  ini_A=At,
-                                                  ini_B=Bt,
                                                   learn_joint_dict=True,
                                                   mode=mode,
-                                                  history=self.ntf.history,
+                                                  ini_dict=self.W,
+                                                  ini_A=ini_A,
+                                                  ini_B=ini_B,
+                                                  batch_size=self.ONMF_batch_size,
                                                   subsample=self.subsample,
                                                   beta=beta)
-
                             self.W, At, Bt, H = self.ntf.train_dict_single()
-                            # print('dictionary_updated')
                             self.code += H
 
-                        # prediction step
-                        patch = A[:, t - k + L:t, :]  ### in the original time orientation
+                            """
+                            # reconstruction step
+                            patch = A[:, t - k + L:t, :]
+                            if learn_from_future2past:
+                                patch_recons = self.predict_joint_single(patch, a1)
+                                A_recons = np.append(patch_recons, A_recons, axis=1)
+                            else:
+                                A_recons = np.append(A_recons, patch_recons, axis=1)
+                            """
 
-                        if learn_from_future2past:
-                            patch_recons = self.predict_joint_single(patch, a1)
-                            # print('patch_recons', patch_recons)
-                            A_recons = np.append(A_recons, patch_recons, axis=1)
                         else:
-                            patch_recons = patch[:, -1, :]
-                            patch_recons = patch_recons[:, np.newaxis, :]
-                            A_recons = np.append(patch_recons, A_recons, axis=1)
+                            if t % self.learnevery == 0 and if_learn_online:  # do not learn from zero data (make np.sum(X)>0 for online learning)
+                                self.ntf = Online_NTF(X, self.n_components,
+                                                      iterations=self.ONMF_sub_iterations,
+                                                      batch_size=self.ONMF_batch_size,
+                                                      ini_dict=self.W,
+                                                      ini_A=At,
+                                                      ini_B=Bt,
+                                                      learn_joint_dict=True,
+                                                      mode=mode,
+                                                      history=self.ntf.history,
+                                                      subsample=self.subsample,
+                                                      beta=beta)
+
+                                self.W, At, Bt, H = self.ntf.train_dict_single()
+                                # print('dictionary_updated')
+                                self.code += H
+
+                            """
+                            # reconstruction step
+                            patch = A[:, t - k + L:t, :]  ### in the original time orientation
+                            if learn_from_future2past:
+                                patch_recons = self.predict_joint_single(patch, a1)
+                                # print('patch_recons', patch_recons)
+                                A_recons = np.append(A_recons, patch_recons, axis=1)
+                            else:
+                                patch_recons = patch[:, -1, :]
+                                patch_recons = patch_recons[:, np.newaxis, :]
+                                A_recons = np.append(patch_recons, A_recons, axis=1)
+                            """
+
+                        if print_iter:
+                            print('Current (trial, day) for ONMF_predictor (%i, %i) out of (%i, %i)' % (
+                                trial + 1, t, num_trials, A.shape[1] - 1))
 
                         # print('!!!!! A_recons.shape', A_recons.shape)
-                    # print('!!!!!!!!!!!! A_recons.shape', A_recons.shape)
-                    if print_iter:
-                        print('Current (trial, day) for ONMF_predictor (%i, %i) out of (%i, %i)' % (
-                            trial + 1, t, num_trials, A.shape[1] - 1))
 
-                    # print('!!!!! A_recons.shape', A_recons.shape)
+                if learn_from_training_set:
+                    # concatenate state-wise dictionary to predict one state
+                    # Assumes len(list_states)=1
+                    self.W = np.concatenate(np.vsplit(self.W, len(self.state_list_train)), axis=1)
 
-            if learn_from_training_set:
-                # concatenate state-wise dictionary to predict one state
-                # Assumes len(list_states)=1
-                self.W = np.concatenate(np.vsplit(self.W, len(self.state_list_train)), axis=1)
 
-                #### forward recursive prediction begins
-            for t in np.arange(A.shape[1], A.shape[1] + future_extraploation_length):
+            #### forward recursive prediction begins
+            for t in np.arange(A.shape[1], A.shape[1] + future_extrapolation_length):
                 patch = A_recons[:, t - k + L:t, :]
+
                 if t == self.data.shape[1]:
                     patch = self.data[:, t - k + L:t, :]
 
@@ -1224,6 +1243,10 @@ class ONMF_timeseries_reconstructor():
                 list = self.state_list
             else:
                 list = self.country_list
+
+            np.save('Time_series_dictionary/' + str(foldername) + '/full_results_' + 'num_trials_' + str(num_trials), self.result_dict)
+
+            """
             np.save('Time_series_dictionary/' + str(foldername) + '/dict_learned_tensor' + '_' + str(
                 list[0]) + '_' + 'afteronline' + str(self.beta), self.W)
             np.save('Time_series_dictionary/' + str(foldername) + '/code_learned_tensor' + '_' + str(
@@ -1233,22 +1256,23 @@ class ONMF_timeseries_reconstructor():
             np.save('Time_series_dictionary/' + str(foldername) + '/Bt_' + str(list[0]) + '_' + 'afteronline' + str(
                 self.beta), Bt)
             np.save('Time_series_dictionary/' + str(foldername) + '/recons', A_recons)
+            """
 
         return A_full_predictions_trials, self.W, At, Bt, self.code
 
     def ONMF_predictor_historic(self,
                                 mode,
                                 foldername,
+                                prelearned_dict_seq = None, # if not none, use this seq of dict for prediction
                                 learn_from_future2past=True,
-                                learn_from_training_set=False,
-                                reverse_data_in_time=True,
                                 ini_dict=None,
                                 ini_A=None,
                                 ini_B=None,
                                 beta=1,
-                                a1=1,  # regularizer for the code in partial fitting
-                                a2=1,  # regularizer for the code in recursive prediction
-                                future_extraploation_length=0,
+                                a1=0,  # regularizer for the code in partial fitting
+                                a2=0,  # regularizer for the code in recursive prediction
+                                future_extrapolation_length=0,
+                                learning_window_cap = None,
                                 if_save=True,
                                 minibatch_training_initialization=False,
                                 minibatch_alpha=1,
@@ -1267,31 +1291,44 @@ class ONMF_timeseries_reconstructor():
         # print('A.shape', A.shape)
         k = self.patch_size
         L = self.prediction_length
-        FEL = future_extraploation_length
+        FEL = future_extrapolation_length
         # A_recons = np.zeros(shape=A.shape)
         # print('A_recons.shape',A_recons.shape)
         # W = self.W
+        if learning_window_cap is None:
+            learning_window_cap = self.learning_window_cap
+
         self.W = ini_dict
+        if ini_dict is None:
+            d = self.data.shape[0]*k*self.data.shape[2]     #(# states) x (# window length) x (# variables)
+            self.W = np.random.rand(d, self.n_components)
         # print('W.shape', self.W.shape)
 
         # A_recons = np.zeros(shape=(A.shape[0], k+L-1, A.shape[2]))
-        A_recons = A[:, 0:k + L - 1, :]
+        # A_recons = A[:, 0:k + L - 1, :]
 
         list_full_predictions = []
+        W_total_seq_trials = []
         for trial in np.arange(num_trials):
-
+            W_total_seq = []
             ### A_total_prediction.shape = (# days) x (# states) x (FEL) x (# variables)
+            ### W_total_seq.shape = (# days) x (# states * window length * # variables) x (n_components)
             A_total_prediction = []
             ### fill in predictions for the first k days with the raw data
             for i in np.arange(k + 1):
                 A_total_prediction.append(A[:, i:i + FEL, :])
-
+                W_total_seq.append(self.W.copy())
             for t in np.arange(k + 1, A.shape[1]):
                 ### Set self.data to the truncated one during [1,t]
                 A1 = A[:, :t, :]
+                prelearned_dict = None
+                if prelearned_dict_seq is not None:
+                    prelearned_dict = prelearned_dict_seq[trial,t,:,:]
+
                 A_recons, W, At, Bt, code = self.ONMF_predictor(mode,
                                                                 foldername,
                                                                 data=A1,
+                                                                prelearned_dict=prelearned_dict,
                                                                 learn_from_future2past=learn_from_future2past,
                                                                 ini_dict=ini_dict,
                                                                 ini_A=ini_A,
@@ -1301,7 +1338,8 @@ class ONMF_timeseries_reconstructor():
                                                                 # regularizer for the code in partial fitting
                                                                 a2=a2,
                                                                 # regularizer for the code in recursive prediction
-                                                                future_extraploation_length=future_extraploation_length,
+                                                                future_extrapolation_length=future_extrapolation_length,
+                                                                learning_window_cap=learning_window_cap,
                                                                 if_save=True,
                                                                 minibatch_training_initialization=minibatch_training_initialization,
                                                                 minibatch_alpha=minibatch_alpha,
@@ -1309,33 +1347,39 @@ class ONMF_timeseries_reconstructor():
                                                                 print_iter=False,
                                                                 online_learning=online_learning,
                                                                 num_trials=1)
+
                 A_recons = A_recons[0, :, :, :]
                 # print('!!!! A_recons.shape', A_recons.shape)
                 ### A_recons.shape = (# states, t+FEL, # variables)
                 # print('!!!!! A_recons[:, -FEL:, :].shape', A_recons[:, -FEL:, :].shape)
                 A_total_prediction.append(A_recons[:, -FEL:, :])
+                W_total_seq.append(W.copy())
                 ### A_recons.shape = (# states, t+FEL, # variables)
                 print('Current (trial, day) for ONMF_predictor_historic (%i, %i) out of (%i, %i)' % (
                     trial + 1, t - k, num_trials, A.shape[1] - k - 1))
 
             A_total_prediction = np.asarray(A_total_prediction)
+            W_total_seq = np.asarray(W_total_seq)
+            print('W_total_seq.shape', W_total_seq.shape)
+            W_total_seq_trials.append(W_total_seq)
             list_full_predictions.append(A_total_prediction)
 
-            self.result_dict.update({'Evaluation_num_trials': str(trial)})
-            self.result_dict.update({'Evaluation_A_full_predictions_trials': np.asarray(list_full_predictions)})
-            self.result_dict.update({'Evaluation_Dictionary': W})
-            self.result_dict.update({'Evaluation_Code': code})
+        W_total_seq_trials = np.asarray(W_total_seq_trials)
+
+        self.result_dict.update({'Evaluation_num_trials': str(num_trials)})
+        self.result_dict.update({'Evaluation_A_full_predictions_trials': np.asarray(list_full_predictions)})
+        self.result_dict.update({'Evaluation_Dictionary_seq_trials': W_total_seq_trials})
+        # sequence of dictionaries to be used for historic prediction : shape (trials, time, W.shape[0], W.shape[1])
 
         A_full_predictions_trials = np.asarray(list_full_predictions)
         print('!!! A_full_predictions_trials.shape', A_full_predictions_trials.shape)
 
         if if_save:
 
-            if self.data_source != 'JHU':
-                list = self.state_list
-            else:
-                list = self.country_list
+            np.save('Time_series_dictionary/' + str(foldername) + '/full_results_' + 'num_trials_' + str(
+                num_trials), self.result_dict)
 
+            """
             np.save('Time_series_dictionary/' + str(foldername) + '/dict_learned_tensor' + '_' + str(
                 list[0]) + '_' + 'afteronline' + str(self.beta), self.W)
             np.save('Time_series_dictionary/' + str(foldername) + '/code_learned_tensor' + '_' + str(
@@ -1346,10 +1390,12 @@ class ONMF_timeseries_reconstructor():
                 self.beta), Bt)
             np.save('Time_series_dictionary/' + str(foldername) + '/Full_prediction_trials_' + 'num_trials_' + str(
                 num_trials), A_full_predictions_trials)
+            np.save('Time_series_dictionary/' + str(foldername) + '/W_total_seq_' + 'num_trials_' + str(
+                num_trials), W_total_seq)
+            """
 
-        print('!!!! code', code.shape)
 
-        return A_full_predictions_trials, W, code
+        return A_full_predictions_trials, W_total_seq_trials, code
 
     def predict_joint_single(self, data, a1):
         k = self.patch_size

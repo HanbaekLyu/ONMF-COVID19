@@ -80,7 +80,7 @@ def main_train_joint():
                                                                  # regularizer for training
                                                                  a2=0,
                                                                  # regularizer for prediction
-                                                                 future_extraploation_length=L,
+                                                                 future_extrapolation_length=L,
                                                                  if_learn_online=True,
                                                                  if_save=True,
                                                                  minibatch_training_initialization=True,
@@ -95,7 +95,7 @@ def main_train_joint():
     ### Run ONMF_prediction on the entire dataset for validation
     if if_ONMF_timeseris_predictor_historic:
 
-        A_full_predictions_trials, W, code = reconstructor.ONMF_predictor_historic(mode=3,
+        A_full_predictions_trials, W_total_seq, code = reconstructor.ONMF_predictor_historic(mode=3,
                                                                                    foldername=foldername,
                                                                                    learn_from_future2past=True,
                                                                                    ini_dict=None,
@@ -106,7 +106,7 @@ def main_train_joint():
                                                                                    # regularizer for the code in partial fitting
                                                                                    a2=0,
                                                                                    # regularizer for the code in recursive prediction
-                                                                                   future_extraploation_length=7,
+                                                                                   future_extrapolation_length=7,
                                                                                    if_save=True,
                                                                                    minibatch_training_initialization=True,
                                                                                    minibatch_alpha=1,
@@ -123,7 +123,7 @@ def main_train_joint():
         filename = "full_prediction_trials_" + str(num_trials) + "_" + list_states_abb
 
         for state in state_list:
-            reconstructor.display_dictionary_Hospital(W, state_name=state, if_show=True, if_save=True,
+            reconstructor.display_dictionary_Hospital(W_total_seq[-1,:,:], state_name=state, if_show=True, if_save=True,
                                                       foldername=foldername,
                                                       filename='online_' + filename)
 
