@@ -23,7 +23,7 @@ def main_train_joint():
     n_components = 16
 
     full_state_list_train = ['California']  ### List of states for learning dictionary from
-    full_state_list_test = ['New York']  ### List of states for transfer-prediction
+    full_state_list_test = ['California']  ### List of states for transfer-prediction
 
     # state_list = ['California', 'Florida', 'Texas', 'New York']
 
@@ -39,6 +39,7 @@ def main_train_joint():
                                                            country_list=None,
                                                            state_list=full_state_list_test,
                                                            state_list_train=full_state_list_train,
+                                                           learn_from_training_set=True,
                                                            alpha=1,
                                                            # L1 sparsity regularizer for minibatch and online learning
                                                            beta=1,  # default learning exponent --
@@ -84,7 +85,7 @@ def main_train_joint():
                                                                                                   if_save=True,
                                                                                                   learning_window_cap=5,
                                                                                                   # learn from past 30 days for prediction
-                                                                                                  minibatch_training_initialization=False,
+                                                                                                  minibatch_training_initialization=True,
                                                                                                   minibatch_alpha=1,
                                                                                                   minibatch_beta=1,
                                                                                                   online_learning=True,

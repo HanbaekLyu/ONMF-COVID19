@@ -1061,7 +1061,7 @@ class ONMF_timeseries_reconstructor():
                        if_save=True,
                        # if_recons=True,  # Reconstruct observed data using learned dictionary
                        learning_window_cap = None, # if not none, learn only from the past "learning_window_cap" days
-                       minibatch_training_initialization=False,
+                       minibatch_training_initialization=True,
                        minibatch_alpha=1,
                        minibatch_beta=1,
                        print_iter=False,
