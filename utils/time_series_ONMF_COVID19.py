@@ -104,22 +104,14 @@ class ONMF_timeseries_reconstructor():
             self.df = covid_dataprocess.read_data_COVIDtrackingProject()
             self.df = self.truncate_NAN_DataFrame()
             self.df = self.moving_avg_log_scale()
-            self.data = self.extract_ndarray_from_DataFrame()
-            # print('!!! df', self.df.get('Florida'))
+            self.extract_ndarray_from_DataFrame()
+
             self.result_dict.update({'Full DataFrame': self.df})
             self.result_dict.update({'Data array': self.data})
             self.result_dict.update({'List_states': self.state_list})
             self.result_dict.update({'List_variables': self.input_variable_list})
-
-            if state_list_train is not None:
-                print('LOADING.. COVID_TRACKING_PROJECT for training set')
-                self.df_train = covid_dataprocess.read_data_COVIDtrackingProject()
-                self.df_train = self.truncate_NAN_DataFrame()
-                self.df_train = self.moving_avg_log_scale()
-                self.data_train = self.extract_ndarray_from_DataFrame()
-                self.result_dict.update({'Full DataFrame (train)': self.df_train})
-                self.result_dict.update({'Data array (train)': self.data_train})
-                self.result_dict.update({'List_states (train)': state_list_train})
+            self.result_dict.update({'Data array (train)': self.data_train})
+            self.result_dict.update({'List_states (train)': self.state_list_train})
 
 
         else:  ### JHU data
@@ -176,7 +168,13 @@ class ONMF_timeseries_reconstructor():
         self.input_variable_list = input_variable_list_noNAN
         print('!!! New input_variable_list', self.input_variable_list)
 
-        for state in self.state_list:
+        state_list_combined = self.state_list
+        state_list_combined = list(set(state_list_combined))
+        if self.state_list_train is not None:
+            for state in self.state_list_train:
+                state_list_combined.append(state)
+
+        for state in state_list_combined:
             df1 = df.get(state)
             for column in self.input_variable_list:
                 l_min = df1[column][df1[column].notnull()].index[0]
@@ -187,7 +185,7 @@ class ONMF_timeseries_reconstructor():
         max_min_date = max(start_dates)
         min_max_date = min(end_dates)
 
-        for state in self.state_list:
+        for state in state_list_combined:
             df1 = df.get(state)
             df1 = df1[max_min_date:min_max_date]
             print('!!! If any value is NAN:', df1.isnull())
@@ -197,25 +195,33 @@ class ONMF_timeseries_reconstructor():
     def extract_ndarray_from_DataFrame(self):
         ## Make numpy array of shape States x Days x variables
         data_combined = []
+        print('!!! self.state_list', self.state_list)
+
+
         df = self.df
-        if self.state_list == None:
+        if self.state_list is None:
             self.state_list = sorted([i for i in set(df.keys())])
 
+        data_test = []
+        data_train = []
+
+        print('!!! self.state_list', self.state_list)
         for state in self.state_list:
             df1 = df.get(state)
+            data_combined = df1[self.input_variable_list].values  ## shape Days x variables
+            data_test.append(data_combined)
 
-            if state == self.state_list[0]:
-                data_combined = df1[self.input_variable_list].values  ## shape Days x variables
-                data_combined = np.expand_dims(data_combined, axis=0)
-                print('!!!Data_combined.shape', data_combined.shape)
-            else:
-                data_new = df1[self.input_variable_list].values  ## shape Days x variables
-                data_new = np.expand_dims(data_new, axis=0)
-                print('!!! Data_new.shape', data_new.shape)
-                data_combined = np.append(data_combined, data_new, axis=0)
+        for state in self.state_list_train:
+            df2 = df.get(state)
+            data_combined = df2[self.input_variable_list].values  ## shape Days x variables
+            data_train.append(data_combined)
 
-        data_combined = np.nan_to_num(data_combined, copy=True, nan=0, posinf=1, neginf=0)
-        return data_combined
+        data_test = np.asarray(data_test)
+        self.data = np.nan_to_num(data_test, copy=True, nan=0, posinf=1, neginf=0)
+        print('!!!! data_test.shape', data_test.shape)
+        data_train = np.asarray(data_train)
+        self.data_train = np.nan_to_num(data_train, copy=True, nan=0, posinf=1, neginf=0)
+        print('!!!! data_train.shape', data_train.shape)
 
     def read_data_as_array_countrywise(self, path):
         '''
@@ -1048,7 +1054,6 @@ class ONMF_timeseries_reconstructor():
                        foldername,
                        data=None,
                        learn_from_future2past=False,
-                       learn_from_training_set=False,
                        prelearned_dict = None, # if not none, use this dictionary for prediction
                        ini_dict=None,
                        ini_A=None,
@@ -1077,9 +1082,8 @@ class ONMF_timeseries_reconstructor():
         else:
             A = data.copy()
 
-        if learn_from_training_set:
-            A_test = A.copy()
-            A = self.data_train[:, A_test.shape[1], :]
+        A_test = A.copy()
+        A = self.data_train[:, :A_test.shape[1],:]
 
         if learning_window_cap is None:
             learning_window_cap = self.learning_window_cap
@@ -1203,10 +1207,9 @@ class ONMF_timeseries_reconstructor():
 
                         # print('!!!!! A_recons.shape', A_recons.shape)
 
-                if learn_from_training_set:
-                    # concatenate state-wise dictionary to predict one state
-                    # Assumes len(list_states)=1
-                    self.W = np.concatenate(np.vsplit(self.W, len(self.state_list_train)), axis=1)
+                # concatenate state-wise dictionary to predict one state
+                # Assumes len(list_states)=1
+                self.W = np.concatenate(np.vsplit(self.W, len(self.state_list_train)), axis=1)
 
 
             #### forward recursive prediction begins
@@ -1265,7 +1268,6 @@ class ONMF_timeseries_reconstructor():
                                 foldername,
                                 prelearned_dict_seq = None, # if not none, use this seq of dict for prediction
                                 learn_from_future2past=True,
-                                learn_from_training_set=True,
                                 ini_dict=None,
                                 ini_A=None,
                                 ini_B=None,
@@ -1331,7 +1333,6 @@ class ONMF_timeseries_reconstructor():
                                                                 data=A1,
                                                                 prelearned_dict=prelearned_dict,
                                                                 learn_from_future2past=learn_from_future2past,
-                                                                learn_from_training_set=learn_from_training_set,
                                                                 ini_dict=ini_dict,
                                                                 ini_A=ini_A,
                                                                 ini_B=ini_B,

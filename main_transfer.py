@@ -23,7 +23,7 @@ def main_train_joint():
     n_components = 16
 
     full_state_list_train = ['California']  ### List of states for learning dictionary from
-    full_state_list_test = ['California']  ### List of states for transfer-prediction
+    full_state_list_test = ['New York']  ### List of states for transfer-prediction
 
     # state_list = ['California', 'Florida', 'Texas', 'New York']
 
@@ -72,7 +72,6 @@ def main_train_joint():
     A_full_predictions_trials, W_total_seq_trials, code = reconstructor_transfer.ONMF_predictor_historic(mode=3,
                                                                                                   foldername=foldername,
                                                                                                   learn_from_future2past=True,
-                                                                                                  learn_from_training_set=True,
                                                                                                   ini_dict=None,
                                                                                                   ini_A=None,
                                                                                                   ini_B=None,

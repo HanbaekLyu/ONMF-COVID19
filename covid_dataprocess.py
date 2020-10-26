@@ -110,7 +110,7 @@ def read_data_COVIDtrackingProject(if_moving_avg_data=False, if_log_scale=False)
         df1 = data.loc[data['state'] == state]
         start_dates.append(min(df1['date']).strftime("%Y-%m-%d"))
         end_dates.append(max(df1['date']).strftime("%Y-%m-%d"))
-        # print('State %s and end_date %s' % (state, max(df1['date']).strftime("%Y-%m-%d")))
+        print('State %s, start_date %s, end_date %s' % (state, min(df1['date']).strftime("%Y-%m-%d"), max(df1['date']).strftime("%Y-%m-%d")))
     max_min_date = max(start_dates)
     min_max_date = min(end_dates)
 
