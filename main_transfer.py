@@ -39,7 +39,6 @@ def main_train_joint():
                                                            country_list=None,
                                                            state_list=full_state_list_test,
                                                            state_list_train=full_state_list_train,
-                                                           learn_from_training_set=True,
                                                            alpha=1,
                                                            # L1 sparsity regularizer for minibatch and online learning
                                                            beta=1,  # default learning exponent --
@@ -73,6 +72,7 @@ def main_train_joint():
     A_full_predictions_trials, W_total_seq_trials, code = reconstructor_transfer.ONMF_predictor_historic(mode=3,
                                                                                                   foldername=foldername,
                                                                                                   learn_from_future2past=True,
+                                                                                                  learn_from_training_set=True,
                                                                                                   ini_dict=None,
                                                                                                   ini_A=None,
                                                                                                   ini_B=None,

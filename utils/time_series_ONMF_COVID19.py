@@ -1265,6 +1265,7 @@ class ONMF_timeseries_reconstructor():
                                 foldername,
                                 prelearned_dict_seq = None, # if not none, use this seq of dict for prediction
                                 learn_from_future2past=True,
+                                learn_from_training_set=True,
                                 ini_dict=None,
                                 ini_A=None,
                                 ini_B=None,
@@ -1330,6 +1331,7 @@ class ONMF_timeseries_reconstructor():
                                                                 data=A1,
                                                                 prelearned_dict=prelearned_dict,
                                                                 learn_from_future2past=learn_from_future2past,
+                                                                learn_from_training_set=learn_from_training_set,
                                                                 ini_dict=ini_dict,
                                                                 ini_A=ini_A,
                                                                 ini_B=ini_B,
