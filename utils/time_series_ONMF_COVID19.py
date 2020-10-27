@@ -83,10 +83,10 @@ class ONMF_timeseries_reconstructor():
             self.df = covid_dataprocess.read_data_COVIDactnow_NYT()
             self.df = self.truncate_NAN_DataFrame()
             self.df = self.moving_avg_log_scale()
-            self.data = self.extract_ndarray_from_DataFrame()
+            self.data_test = self.extract_ndarray_from_DataFrame()
             self.result_dict.update({'Data source': 'COVID_ACT_NOW'})
             self.result_dict.update({'Full DataFrame': self.df})
-            self.result_dict.update({'Data array': self.data})
+            self.result_dict.update({'Data array': self.data_test})
             self.result_dict.update({'List_states': self.state_list})
             self.result_dict.update({'List_variables': self.input_variable_list})
 
@@ -107,7 +107,7 @@ class ONMF_timeseries_reconstructor():
             self.extract_ndarray_from_DataFrame()
 
             self.result_dict.update({'Full DataFrame': self.df})
-            self.result_dict.update({'Data array': self.data})
+            self.result_dict.update({'Data array': self.data_test})
             self.result_dict.update({'List_states': self.state_list})
             self.result_dict.update({'List_variables': self.input_variable_list})
             self.result_dict.update({'Data array (train)': self.data_train})
@@ -116,11 +116,11 @@ class ONMF_timeseries_reconstructor():
 
         else:  ### JHU data
             print('LOADING.. JHU Data')
-            self.data = self.combine_data(self.source)
+            self.data_test = self.combine_data(self.source)
 
-        print('data', self.data)
-        print('data.shape', self.data.shape)
-        self.ntf = Online_NTF(self.data, self.n_components,
+        print('data', self.data_test)
+        print('data.shape', self.data_test.shape)
+        self.ntf = Online_NTF(self.data_test, self.n_components,
                               iterations=self.ONMF_sub_iterations,
                               learn_joint_dict=True,
                               mode=3,
@@ -129,7 +129,7 @@ class ONMF_timeseries_reconstructor():
                               ini_B=None,
                               batch_size=self.ONMF_batch_size)
 
-        self.W = np.zeros(shape=(self.data.shape[0] * self.data.shape[2] * patch_size, n_components))
+        self.W = np.zeros(shape=(self.data_test.shape[0] * self.data_test.shape[2] * patch_size, n_components))
 
     def moving_avg_log_scale(self):
         df = self.df
@@ -217,7 +217,7 @@ class ONMF_timeseries_reconstructor():
             data_train.append(data_combined)
 
         data_test = np.asarray(data_test)
-        self.data = np.nan_to_num(data_test, copy=True, nan=0, posinf=1, neginf=0)
+        self.data_test = np.nan_to_num(data_test, copy=True, nan=0, posinf=1, neginf=0)
         print('!!!! data_test.shape', data_test.shape)
         data_train = np.asarray(data_train)
         self.data_train = np.nan_to_num(data_train, copy=True, nan=0, posinf=1, neginf=0)
@@ -364,7 +364,7 @@ class ONMF_timeseries_reconstructor():
                 print('!!! Data_new.shape', data_new.shape)
                 data_combined = np.append(data_combined, data_new, axis=0)
 
-        self.data = data_combined
+        self.data_test = data_combined
         return df, data_combined
 
     def read_data_COVIDtrackingProject(self, path):
@@ -435,7 +435,7 @@ class ONMF_timeseries_reconstructor():
                 print('!!! Data_new.shape', data_new.shape)
                 data_combined = np.append(data_combined, data_new, axis=0)
 
-        self.data = data_combined
+        self.data_test = data_combined
         return df, data_combined
 
     def read_data_as_array_citywise(self, path):
@@ -490,7 +490,7 @@ class ONMF_timeseries_reconstructor():
         '''
         Extract 'num_patches_perbatch' (segments) of size 'patch_size'many random patches of given size
         '''
-        x = self.data.shape  # shape = 2 (ask, bid) * time * country
+        x = self.data_test.shape  # shape = 2 (ask, bid) * time * country
         k = self.patch_size
         if batch_size is None:
             num_patches_perbatch = self.num_patches_perbatch
@@ -504,7 +504,7 @@ class ONMF_timeseries_reconstructor():
             else:
                 a = time_interval_initial + i
 
-            Y = self.data[:, a:a + k, :]  # shape 2 * k * x[2]
+            Y = self.data_test[:, a:a + k, :]  # shape 2 * k * x[2]
             Y = Y[:, :, :, np.newaxis]
             # print('Y.shape', Y.shape)
             if i == 0:
@@ -513,19 +513,23 @@ class ONMF_timeseries_reconstructor():
                 X = np.append(X, Y, axis=3)  # x is class ndarray
         return X  # X.shape = (2, k, num_countries, num_patches_perbatch)
 
-    def extract_patches_interval(self, time_interval_initial, time_interval_terminal):
+    def extract_patches_interval(self, time_interval_initial, time_interval_terminal, A=None):
         '''
         Extract a given number of patches (segments) of size 'patch_size' during the given interval
         X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
         '''
-        x = self.data.shape  # shape = (# states) x (# days) x (# variables)
+        x = self.data_test.shape  # shape = (# states) x (# days) x (# variables)
         k = self.patch_size  # num of consecutive days to form a single patch = window length
 
         X = np.zeros(
             shape=(x[0], k, x[2], 1))  # (# states) x (# window length) x (# variables) x (num_patches_perbatch)
         for i in np.arange(self.num_patches_perbatch):
             a = np.random.choice(np.arange(time_interval_initial, time_interval_terminal - k + 1))
-            Y = self.data[:, a:a + k, :]  # shape 2 * k * x[2]
+            if A is None:
+                Y = self.data[:, a:a + k, :]  # shape 2 * k * x[2]
+            else:
+                Y = A[:, a:a + k, :]  # shape 2 * k * x[2]
+
             Y = Y[:, :, :, np.newaxis]
             # print('Y.shape', Y.shape)
             if i == 0:
@@ -625,7 +629,7 @@ class ONMF_timeseries_reconstructor():
     def display_dictionary_Hospital(self, W, state_name, if_show, if_save, foldername, filename=None,
                                     custom_code4ordering=None):
         k = self.patch_size
-        x = self.data.shape
+        x = self.data_test.shape
         rows = np.floor(np.sqrt(self.n_components)).astype(int)
         cols = np.ceil(np.sqrt(self.n_components)).astype(int)
 
@@ -683,7 +687,7 @@ class ONMF_timeseries_reconstructor():
 
     def display_dictionary_single(self, W, if_show, if_save, foldername, filename, custom_code4ordering=None):
         k = self.patch_size
-        x = self.data.shape
+        x = self.data_test.shape
         code = self.code
         # print('code', code)
         importance = np.sum(code, axis=1) / sum(sum(code))
@@ -742,7 +746,7 @@ class ONMF_timeseries_reconstructor():
 
     def display_prediction_evaluation(self, prediction, if_show, if_save, foldername, filename, if_errorbar=True,
                                       if_evaluation=False, title=None):
-        A = self.data
+        A = self.data_test
         k = self.patch_size
         A_recons = prediction
         print('!!!!!!!A_recons.shape', A_recons.shape)
@@ -1077,13 +1081,14 @@ class ONMF_timeseries_reconstructor():
         Trains dictionary along a continuously sliding window over the data stream 
         Predict forthcoming data on the fly. This could be made to affect learning rate 
         '''
+
+
+
         if data is None:
-            A = self.data.copy()
+            A = self.data_train.copy()
         else:
             A = data.copy()
 
-        A_test = A.copy()
-        A = self.data_train[:, :A_test.shape[1],:]
 
         if learning_window_cap is None:
             learning_window_cap = self.learning_window_cap
@@ -1126,7 +1131,7 @@ class ONMF_timeseries_reconstructor():
                                                         update_self=True,
                                                         if_save=False)
 
-                # print('data.shape', self.data.shape)
+                # print('data.shape', self.data_test.shape)
                 # iter = np.floor(A.shape[1]/self.num_patches_perbatch).astype(int)
                 if online_learning:
                     T_start = k
@@ -1137,12 +1142,14 @@ class ONMF_timeseries_reconstructor():
                         if not learn_from_future2past:
                             a = np.maximum(0, t - self.num_patches_perbatch)
                             X = self.extract_patches_interval(time_interval_initial=a,
-                                                              time_interval_terminal=t)  # get patch from the past2future
+                                                              time_interval_terminal=t,
+                                                              A = A)  # get patch from the past2future
                         else:
                             t1 = A.shape[1] - t
                             a = np.minimum(A.shape[1], t1 + self.num_patches_perbatch)
                             X = self.extract_patches_interval(time_interval_initial=t1,
-                                                              time_interval_terminal=a)  # get patch from the future2past
+                                                              time_interval_terminal=a,
+                                                              A = A)  # get patch from the future2past
 
                         # print('X.shape', X.shape)
                         # X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
@@ -1216,8 +1223,8 @@ class ONMF_timeseries_reconstructor():
             for t in np.arange(A.shape[1], A.shape[1] + future_extrapolation_length):
                 patch = A_recons[:, t - k + L:t, :]
 
-                if t == self.data.shape[1]:
-                    patch = self.data[:, t - k + L:t, :]
+                if t == self.data_test.shape[1]:
+                    patch = self.data_test[:, t - k + L:t, :]
 
                 # print('!!!!! patch.shape', patch.shape)
                 patch_recons = self.predict_joint_single(patch, a2)
@@ -1289,7 +1296,7 @@ class ONMF_timeseries_reconstructor():
         for evaluation  
         '''
 
-        A = self.data
+        A = self.data_test
 
         # print('A.shape', A.shape)
         k = self.patch_size
@@ -1303,7 +1310,7 @@ class ONMF_timeseries_reconstructor():
 
         self.W = ini_dict
         if ini_dict is None:
-            d = self.data.shape[0]*k*self.data.shape[2]     #(# states) x (# window length) x (# variables)
+            d = self.data_test.shape[0]*k*self.data_test.shape[2]     #(# states) x (# window length) x (# variables)
             self.W = np.random.rand(d, self.n_components)
         # print('W.shape', self.W.shape)
 
@@ -1322,7 +1329,7 @@ class ONMF_timeseries_reconstructor():
                 A_total_prediction.append(A[:, i:i + FEL, :])
                 W_total_seq.append(self.W.copy())
             for t in np.arange(k + 1, A.shape[1]):
-                ### Set self.data to the truncated one during [1,t]
+                ### Set self.data_test to the truncated one during [1,t]
                 A1 = A[:, :t, :]
                 prelearned_dict = None
                 if prelearned_dict_seq is not None:
@@ -1403,11 +1410,11 @@ class ONMF_timeseries_reconstructor():
     def predict_joint_single(self, data, a1):
         k = self.patch_size
         L = self.prediction_length
-        A = data  # A.shape = (self.data.shape[0], k-L, self.data.shape[2])
+        A = data  # A.shape = (self.data_test.shape[0], k-L, self.data_test.shape[2])
         # A_recons = np.zeros(shape=(A.shape[0], k, A.shape[2]))
         # W_tensor = self.W.reshape((k, A.shape[0], -1))
         # print('A.shape', A.shape)
-        W_tensor = self.W.reshape((self.data.shape[0], k, self.data.shape[2], -1))
+        W_tensor = self.W.reshape((self.data_test.shape[0], k, self.data_test.shape[2], -1))
         # print('W.shape', W_tensor.shape)
 
         # for missing data, not needed for the COVID-19 data set

@@ -82,7 +82,7 @@ def main_train_joint():
                                                                                                   # regularizer for the code in recursive prediction
                                                                                                   future_extrapolation_length=7,
                                                                                                   if_save=True,
-                                                                                                  learning_window_cap=5,
+                                                                                                  learning_window_cap=30,
                                                                                                   # learn from past 30 days for prediction
                                                                                                   minibatch_training_initialization=True,
                                                                                                   minibatch_alpha=1,
