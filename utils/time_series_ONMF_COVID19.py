@@ -19,7 +19,7 @@ class ONMF_timeseries_reconstructor():
                  source,
                  data_source,
                  country_list=None,
-                 state_list=None,
+                 state_list_test=None,
                  state_list_train=None,
                  n_components=100,  # number of dictionary elements -- rank
                  ONMF_iterations=50,  # number of iterations for the ONMF algorithm
@@ -47,7 +47,7 @@ class ONMF_timeseries_reconstructor():
         self.path = path
         self.source = source
         self.data_source = data_source
-        self.state_list = state_list
+        self.state_list = state_list_test
         self.country_list = country_list
         self.n_components = n_components
         self.ONMF_iterations = ONMF_iterations

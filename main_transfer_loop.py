@@ -22,13 +22,16 @@ def main_train_joint():
 
     n_components = 16
 
-    full_state_list_train = ['California']  ### List of states for learning dictionary from
-    full_state_list_test = ['New York']  ### List of states for transfer-prediction
+    full_state_list_train = ['California', 'New York', 'Washington', 'Florida', 'Texas']  ### List of states for learning dictionary from
+    full_state_list_test = ['Washington', 'New York', 'California', 'Florida', 'Texas']  ### List of states for transfer-prediction
 
     # state_list = ['California', 'Florida', 'Texas', 'New York']
 
     data_source_list = ['COVID_ACT_NOW', 'COVID_TRACKING_PROJECT', 'JHU']
     data_source = data_source_list[1]
+    onestep_prediction_length = 1
+    moving_window_size = 14
+    future_extrapolation_length = 7
     num_trials = 1
 
     for train_state in full_state_list_train:
@@ -38,7 +41,7 @@ def main_train_joint():
                                                                source=source,
                                                                data_source=data_source,
                                                                country_list=None,
-                                                               state_list=[train_state],
+                                                               state_list_test=[train_state],
                                                                state_list_train=[train_state],
                                                                alpha=1,
                                                                # L1 sparsity regularizer for minibatch and online learning
@@ -47,23 +50,23 @@ def main_train_joint():
                                                                # learning rate exponent in online learning -- smaller weighs new data more
                                                                n_components=n_components,
                                                                # number of dictionary elements -- rank
-                                                               ONMF_iterations=50,
+                                                               ONMF_iterations=10,
                                                                # number of iterations for the ONTF algorithm
                                                                ONMF_sub_iterations=2,
                                                                # number of i.i.d. subsampling for each iteration of ONTF
-                                                               ONMF_batch_size=50,
+                                                               ONMF_batch_size=5,
                                                                # number of patches used in i.i.d. subsampling
                                                                num_patches_perbatch=100,
                                                                # number of patches per ONMF iteration (size of mini batch)
                                                                # number of patches that ONTF algorithm learns from at each iteration
-                                                               patch_size=14,
-                                                               prediction_length=1,
+                                                               patch_size=moving_window_size,
+                                                               prediction_length=onestep_prediction_length,
                                                                learnevery=1,
                                                                subsample=False,
                                                                if_onlynewcases=True,
                                                                # take the derivate of the time-series of total to get new cases
                                                                if_moving_avg_data=False,
-                                                               if_log_scale=True)
+                                                               if_log_scale=False)
 
         ### Run ONMF_prediction on the entire dataset for validation
         # print('!!!! W1.shape', W1.shape)
@@ -71,76 +74,87 @@ def main_train_joint():
         # print('!!!! W2.shape', W2.shape)
 
         A_full_predictions_trials, W_total_seq_trials, code = reconstructor_transfer.ONMF_predictor_historic(mode=3,
-                                                                                                      foldername=foldername,
-                                                                                                      learn_from_future2past=True,
-                                                                                                      ini_dict=None,
-                                                                                                      ini_A=None,
-                                                                                                      ini_B=None,
-                                                                                                      beta=1,
-                                                                                                      a1=0,
-                                                                                                      # regularizer for the code in partial fitting
-                                                                                                      a2=0,
-                                                                                                      # regularizer for the code in recursive prediction
-                                                                                                      future_extrapolation_length=7,
-                                                                                                      if_save=True,
-                                                                                                      learning_window_cap=5,
-                                                                                                      # learn from past 30 days for prediction
-                                                                                                      minibatch_training_initialization=False,
-                                                                                                      minibatch_alpha=1,
-                                                                                                      minibatch_beta=1,
-                                                                                                      online_learning=True,
-                                                                                                      num_trials=num_trials)  # take a number of trials to generate empirical confidence interval
+                                                                                                             foldername=foldername,
+                                                                                                             learn_from_future2past=True,
+                                                                                                             ini_dict=None,
+                                                                                                             ini_A=None,
+                                                                                                             ini_B=None,
+                                                                                                             beta=1,
+                                                                                                             a1=0,
+                                                                                                             # regularizer for the code in partial fitting
+                                                                                                             a2=0,
+                                                                                                             # regularizer for the code in recursive prediction
+                                                                                                             future_extrapolation_length=future_extrapolation_length,
+                                                                                                             if_save=True,
+                                                                                                             learning_window_cap=10,
+                                                                                                             # learn from past 30 days for prediction
+                                                                                                             minibatch_training_initialization=True,
+                                                                                                             minibatch_alpha=1,
+                                                                                                             minibatch_beta=1,
+                                                                                                             online_learning=True,
+                                                                                                             num_trials=num_trials)  # take a number of trials to generate empirical confidence interval
 
         ### plot online-trained dictionary (from last iteration)
-        filename = "final_learned_dictionary_" + str(num_trials) + "_" + train_state
+        filename = "final_learned_dictionary_" + str(num_trials)
         reconstructor_transfer.display_dictionary_Hospital(W_total_seq_trials[-1,-1, :, :], state_name=train_state,
-                                                           if_show=True, if_save=True,
+                                                           if_show=False, if_save=True,
                                                            foldername=foldername,
                                                            filename='online_' + filename)
 
         ### Loop over multiple states to predict using W_total_seq learned from the current test state
         for test_state in full_state_list_test:
             reconstructor_transfer = ONMF_timeseries_reconstructor(path=path_COVID_tracking_proj,
-                                                                   source=source,
-                                                                   data_source=data_source,
-                                                                   country_list=None,
-                                                                   state_list=[test_state],
-                                                                   state_list_train=[train_state],
-                                                                   alpha=1,
-                                                                   # L1 sparsity regularizer for minibatch and online learning
-                                                                   beta=1,  # default learning exponent --
-                                                                   # customized in both trianing and online prediction functions
-                                                                   # learning rate exponent in online learning -- smaller weighs new data more
-                                                                   n_components=n_components,
-                                                                   # number of dictionary elements -- rank
-                                                                   ONMF_iterations=50,
-                                                                   # number of iterations for the ONTF algorithm
-                                                                   ONMF_sub_iterations=2,
-                                                                   # number of i.i.d. subsampling for each iteration of ONTF
-                                                                   ONMF_batch_size=50,
-                                                                   # number of patches used in i.i.d. subsampling
-                                                                   num_patches_perbatch=100,
-                                                                   # number of patches per ONMF iteration (size of mini batch)
-                                                                   # number of patches that ONTF algorithm learns from at each iteration
-                                                                   patch_size=14,
-                                                                   prediction_length=1,
-                                                                   learnevery=1,
-                                                                   subsample=False,
-                                                                   if_onlynewcases=True,
-                                                                   # take the derivate of the time-series of total to get new cases
-                                                                   if_moving_avg_data=False,
-                                                                   if_log_scale=True)
+                                                               source=source,
+                                                               data_source=data_source,
+                                                               country_list=None,
+                                                               state_list_test=[test_state],
+                                                               state_list_train=[train_state],
+                                                               alpha=1,
+                                                               # L1 sparsity regularizer for minibatch and online learning
+                                                               beta=1,  # default learning exponent --
+                                                               # customized in both trianing and online prediction functions
+                                                               # learning rate exponent in online learning -- smaller weighs new data more
+                                                               n_components=n_components,
+                                                               # number of dictionary elements -- rank
+                                                               ONMF_iterations=10,
+                                                               # number of iterations for the ONTF algorithm
+                                                               ONMF_sub_iterations=2,
+                                                               # number of i.i.d. subsampling for each iteration of ONTF
+                                                               ONMF_batch_size=5,
+                                                               # number of patches used in i.i.d. subsampling
+                                                               num_patches_perbatch=100,
+                                                               # number of patches per ONMF iteration (size of mini batch)
+                                                               # number of patches that ONTF algorithm learns from at each iteration
+                                                               patch_size=moving_window_size,
+                                                               prediction_length=onestep_prediction_length,
+                                                               learnevery=1,
+                                                               subsample=False,
+                                                               if_onlynewcases=True,
+                                                               # take the derivate of the time-series of total to get new cases
+                                                               if_moving_avg_data=False,
+                                                               if_log_scale=False)
 
-            A_full_predictions_trials, W_total_seq1, code = reconstructor_transfer.ONMF_predictor_historic(mode=3,
-                                                                                                          foldername=foldername,
-                                                                                                          prelearned_dict_seq=W_total_seq_trials,
-                                                                                                          a1=0,
-                                                                                                          # regularizer for the code in partial fitting
-                                                                                                          a2=0,
-                                                                                                          # regularizer for the code in recursive prediction
-                                                                                                          future_extrapolation_length=7,
-                                                                                                          if_save=True,
-                                                                                                          num_trials=num_trials)  # take a number of trials to generate empirical confidence interval
+
+            A_full_predictions_trials, W_total_seq_trials, code = reconstructor_transfer.ONMF_predictor_historic(mode=3,
+                                    foldername=foldername,
+                                    learn_from_future2past=True,
+                                    ini_dict=None,
+                                    ini_A=None,
+                                    ini_B=None,
+                                    beta=1,
+                                    a1=0,
+                                    # regularizer for the code in partial fitting
+                                    a2=0,
+                                    # regularizer for the code in recursive prediction
+                                    future_extrapolation_length=future_extrapolation_length,
+                                    if_save=True,
+                                    learning_window_cap=10,
+                                    # learn from past 30 days for prediction
+                                    minibatch_training_initialization=True,
+                                    minibatch_alpha=1,
+                                    minibatch_beta=1,
+                                    online_learning=True,
+                                    num_trials=num_trials)  # take a number of trials to generate empirical confidence interval
 
             print('A_full_predictions_trials.shape', A_full_predictions_trials.shape)
             # print('A_full_predictions_trials', A_full_predictions_trials)
@@ -152,9 +166,14 @@ def main_train_joint():
             list_states_abb_test = [us_state_abbrev[state] for state in [test_state]]
             list_test = '-'.join(list_states_abb_test)
 
-            filename = "full_prediction_trials_" + str(num_trials) + "_" + list_train + str(2) + list_test
+            filename = "full_prediction_trials_" + str(num_trials) + "_" + "PL_" + str(
+                onestep_prediction_length) + "_FEL_" + str(future_extrapolation_length) + "_" + list_train + str(
+                2) + list_test
 
-            title = test_state + " (" + "transfer prediction using dictionary learned from" + str(list_train) + ")"
+            title = test_state + " (" + "transfer prediction using dictionary learned from " + str(
+                list_train) + ") \n" + "moving window size= " + str(moving_window_size) + ", 1-step prediction= " + str(
+                onestep_prediction_length) + " days ahead" + ", " + "total prediction: " + str(
+                future_extrapolation_length + onestep_prediction_length - 1) + " days ahead"
             reconstructor_transfer.display_prediction_evaluation(A_full_predictions_trials[:, ], if_show=False,
                                                                  if_save=True,
                                                                  foldername=foldername,

@@ -23,7 +23,7 @@ def main_train_joint():
     n_components = 16
 
     full_state_list_train = ['California']  ### List of states for learning dictionary from
-    full_state_list_test = ['California']  ### List of states for transfer-prediction
+    full_state_list_test = ['New York']  ### List of states for transfer-prediction
 
     # state_list = ['California', 'Florida', 'Texas', 'New York']
 
@@ -40,7 +40,7 @@ def main_train_joint():
                                                            source=source,
                                                            data_source=data_source,
                                                            country_list=None,
-                                                           state_list=full_state_list_test,
+                                                           state_list_test=full_state_list_test,
                                                            state_list_train=full_state_list_train,
                                                            alpha=1,
                                                            # L1 sparsity regularizer for minibatch and online learning
@@ -118,8 +118,8 @@ def main_train_joint():
     list_test = '-'.join(list_states_abb_test)
 
     ### plot online-trained dictionary (from last iteration)
-    filename = "final_learned_dictionary_" + str(num_trials) + "_" + full_state_list_train[0]
-    reconstructor_transfer.display_dictionary_Hospital(W_total_seq_trials[-1, -1, :, :], state_name=full_state_list_test[0],
+    filename = "final_learned_dictionary"
+    reconstructor_transfer.display_dictionary_Hospital(W_total_seq_trials[-1, -1, :, :], state_name=full_state_list_train[0],
                                                        if_show=True, if_save=True,
                                                        foldername=foldername,
                                                        filename='online_' + filename)
