@@ -23,12 +23,15 @@ def main_train_joint():
     n_components = 16
 
     full_state_list_train = ['California']  ### List of states for learning dictionary from
-    full_state_list_test = ['New York']  ### List of states for transfer-prediction
+    full_state_list_test = ['California']  ### List of states for transfer-prediction
 
     # state_list = ['California', 'Florida', 'Texas', 'New York']
 
     data_source_list = ['COVID_ACT_NOW', 'COVID_TRACKING_PROJECT', 'JHU']
     data_source = data_source_list[1]
+    onestep_prediction_length = 1
+    moving_window_size = 14
+    future_extrapolation_length = 7
     num_trials = 1
 
 
@@ -46,23 +49,23 @@ def main_train_joint():
                                                            # learning rate exponent in online learning -- smaller weighs new data more
                                                            n_components=n_components,
                                                            # number of dictionary elements -- rank
-                                                           ONMF_iterations=50,
+                                                           ONMF_iterations=10,
                                                            # number of iterations for the ONTF algorithm
                                                            ONMF_sub_iterations=2,
                                                            # number of i.i.d. subsampling for each iteration of ONTF
-                                                           ONMF_batch_size=50,
+                                                           ONMF_batch_size=5,
                                                            # number of patches used in i.i.d. subsampling
                                                            num_patches_perbatch=100,
                                                            # number of patches per ONMF iteration (size of mini batch)
                                                            # number of patches that ONTF algorithm learns from at each iteration
-                                                           patch_size=14,
-                                                           prediction_length=1,
+                                                           patch_size=moving_window_size,
+                                                           prediction_length=onestep_prediction_length,
                                                            learnevery=1,
                                                            subsample=False,
                                                            if_onlynewcases=True,
                                                            # take the derivate of the time-series of total to get new cases
                                                            if_moving_avg_data=False,
-                                                           if_log_scale=True)
+                                                           if_log_scale=False)
 
     ### Run ONMF_prediction on the entire dataset for validation
     # print('!!!! W1.shape', W1.shape)
@@ -80,9 +83,9 @@ def main_train_joint():
                                                                                                   # regularizer for the code in partial fitting
                                                                                                   a2=0,
                                                                                                   # regularizer for the code in recursive prediction
-                                                                                                  future_extrapolation_length=7,
+                                                                                                  future_extrapolation_length=future_extrapolation_length,
                                                                                                   if_save=True,
-                                                                                                  learning_window_cap=30,
+                                                                                                  learning_window_cap=10,
                                                                                                   # learn from past 30 days for prediction
                                                                                                   minibatch_training_initialization=True,
                                                                                                   minibatch_alpha=1,
@@ -121,9 +124,9 @@ def main_train_joint():
                                                        foldername=foldername,
                                                        filename='online_' + filename)
 
-    filename = "full_prediction_trials_" + str(num_trials) + "_" + list_train + str(2) + list_test
+    filename = "full_prediction_trials_" + str(num_trials) + "_" + "PL_" + str(onestep_prediction_length) + "_FEL_" + str(future_extrapolation_length)  + "_" + list_train + str(2) + list_test
 
-    title = full_state_list_test[0] + " (" + "transfer prediction using dictionary learned from" + str(list_train) + ")"
+    title = full_state_list_test[0] + " (" + "transfer prediction using dictionary learned from " + str(list_train) + ") \n" + "moving window size= " + str(moving_window_size) + ", 1-step prediction= " + str(onestep_prediction_length) + " days ahead" + ", " + "total prediction: " + str(future_extrapolation_length+onestep_prediction_length-1) +" days ahead"
     reconstructor_transfer.display_prediction_evaluation(A_full_predictions_trials[:, ], if_show=False,
                                                          if_save=True,
                                                          foldername=foldername,

@@ -486,7 +486,7 @@ class ONMF_timeseries_reconstructor():
         data_combined[where_are_NaNs] = 0
         return data_combined
 
-    def extract_random_patches(self, batch_size=None, time_interval_initial=None):
+    def extract_random_patches(self, batch_size=None, time_interval_initial=None, A=None):
         '''
         Extract 'num_patches_perbatch' (segments) of size 'patch_size'many random patches of given size
         '''
@@ -503,8 +503,11 @@ class ONMF_timeseries_reconstructor():
                 a = np.random.choice(x[1] - k)  # starting time of a window patch of length k
             else:
                 a = time_interval_initial + i
+            if A is None:
+                Y = self.data_train[:, a:a + k, :]  # shape 2 * k * x[2]
+            else:
+                Y = A[:, a:a + k, :]  # shape 2 * k * x[2]
 
-            Y = self.data_test[:, a:a + k, :]  # shape 2 * k * x[2]
             Y = Y[:, :, :, np.newaxis]
             # print('Y.shape', Y.shape)
             if i == 0:
@@ -526,7 +529,7 @@ class ONMF_timeseries_reconstructor():
         for i in np.arange(self.num_patches_perbatch):
             a = np.random.choice(np.arange(time_interval_initial, time_interval_terminal - k + 1))
             if A is None:
-                Y = self.data[:, a:a + k, :]  # shape 2 * k * x[2]
+                Y = self.data_train[:, a:a + k, :]  # shape 2 * k * x[2]
             else:
                 Y = A[:, a:a + k, :]  # shape 2 * k * x[2]
 
@@ -549,7 +552,7 @@ class ONMF_timeseries_reconstructor():
         '''
 
         if DEBUG:
-            print(np.asarray(self.data))
+            print(np.asarray(self.data_test))
 
         patches = self.extract_random_patches()
         print('patches.shape=', patches.shape)
@@ -557,7 +560,7 @@ class ONMF_timeseries_reconstructor():
 
     def display_dictionary(self, W, cases, if_show, if_save, foldername, filename=None, custom_code4ordering=None):
         k = self.patch_size
-        x = self.data.shape
+        x = self.data_test.shape
         rows = np.floor(np.sqrt(self.n_components)).astype(int)
         cols = np.ceil(np.sqrt(self.n_components)).astype(int)
 
@@ -760,14 +763,16 @@ class ONMF_timeseries_reconstructor():
 
             # for i in np.arange(0, A_predict1.shape[2]):
             #     A_recons1[:,i + A_predict1.shape[3],:,:] = A_predict1[:,i,:, -1,:]
-            a = np.zeros(shape=(A_predict1.shape[0], A_predict1.shape[3], A.shape[0], A.shape[2]))
-            A_recons1 = np.append(a, A_recons1, axis=1)
-            print('!!!! A.shape[1]+A_predict1.shape[3]', A.shape[1] + A_predict1.shape[3])
+            # We are making d-days ahead prediction where d = (Future Extrapolation Length) + (prediction_length) -1
+            a = np.zeros(shape=(A_predict1.shape[0], A_predict1.shape[3] + self.prediction_length, A.shape[0], A.shape[2]))
+            A_recons1 = np.append(a, A_recons1, axis=1)  # Shift A_recons1 by d in time
+            print('!!!! A.shape[1]+A_predict1.shape[3]', A.shape[1] + A_predict1.shape[3] + self.prediction_length)
             print('!!!! A_recons1.shape', A_recons1.shape)
 
             A_recons1 = np.swapaxes(A_recons1, axis1=1, axis2=2)
+            # fill in first d entries of prediction by the raw data
             for trial in np.arange(0, A_predict1.shape[0]):
-                for j in np.arange(0, A_predict1.shape[3]):
+                for j in np.arange(0, A_predict1.shape[3] + self.prediction_length):
                     A_recons1[trial, :, j, :] = A[:, j, :]
 
             A_recons = A_recons1
@@ -980,6 +985,7 @@ class ONMF_timeseries_reconstructor():
                    beta,
                    learn_joint_dict,
                    foldername,
+                   data_train = None,
                    iterations=None,
                    update_self=True,
                    if_save=True,
@@ -994,13 +1000,16 @@ class ONMF_timeseries_reconstructor():
         At = []
         Bt = []
         code = self.code
+        if data_train is None:
+            data_train = self.data_train
+
         if iterations is not None:
             n_iter = iterations
         else:
             n_iter = self.ONMF_iterations
 
         for t in np.arange(n_iter):
-            X = self.extract_random_patches()
+            X = self.extract_random_patches(A=data_train)  ## need to sample patches from self.data_test
             if t == 0:
                 self.ntf = Online_NTF(X, self.n_components,
                                       iterations=self.ONMF_sub_iterations,
@@ -1056,7 +1065,8 @@ class ONMF_timeseries_reconstructor():
     def ONMF_predictor(self,
                        mode,
                        foldername,
-                       data=None,
+                       data_test=None,
+                       data_train=None,
                        learn_from_future2past=False,
                        prelearned_dict = None, # if not none, use this dictionary for prediction
                        ini_dict=None,
@@ -1084,10 +1094,12 @@ class ONMF_timeseries_reconstructor():
 
 
 
-        if data is None:
-            A = self.data_train.copy()
-        else:
-            A = data.copy()
+        if data_test is None:
+            data_test = self.data_test.copy()
+
+        if data_train is None:
+            data_train = self.data_train.copy()
+
 
 
         if learning_window_cap is None:
@@ -1107,7 +1119,7 @@ class ONMF_timeseries_reconstructor():
         # A_recons = np.zeros(shape=(A.shape[0], k+L-1, A.shape[2]))
 
         list_full_predictions = []
-        A_recons = A.copy()
+        A_recons = data_test.copy()
 
         for trial in np.arange(num_trials):
             ### Initialize self parameters
@@ -1136,20 +1148,20 @@ class ONMF_timeseries_reconstructor():
                 if online_learning:
                     T_start = k
                     if learning_window_cap is not None:
-                        T_start = max(k, A.shape[1]-learning_window_cap)
+                        T_start = max(k, data_train.shape[1]-learning_window_cap)
 
-                    for t in np.arange(T_start, A.shape[1]):
+                    for t in np.arange(T_start, data_train.shape[1]):
                         if not learn_from_future2past:
                             a = np.maximum(0, t - self.num_patches_perbatch)
                             X = self.extract_patches_interval(time_interval_initial=a,
                                                               time_interval_terminal=t,
-                                                              A = A)  # get patch from the past2future
+                                                              A = data_train)  # get patch from the past2future
                         else:
-                            t1 = A.shape[1] - t
-                            a = np.minimum(A.shape[1], t1 + self.num_patches_perbatch)
+                            t1 = data_train.shape[1] - t
+                            a = np.minimum(data_train.shape[1], t1 + self.num_patches_perbatch)
                             X = self.extract_patches_interval(time_interval_initial=t1,
                                                               time_interval_terminal=a,
-                                                              A = A)  # get patch from the future2past
+                                                              A = data_train)  # get patch from the future2past
 
                         # print('X.shape', X.shape)
                         # X.shape = (# states) x (# window length) x (# variables) x (num_patches_perbatch)
@@ -1210,7 +1222,7 @@ class ONMF_timeseries_reconstructor():
 
                         if print_iter:
                             print('Current (trial, day) for ONMF_predictor (%i, %i) out of (%i, %i)' % (
-                                trial + 1, t, num_trials, A.shape[1] - 1))
+                                trial + 1, t, num_trials, data_train.shape[1] - 1))
 
                         # print('!!!!! A_recons.shape', A_recons.shape)
 
@@ -1220,23 +1232,24 @@ class ONMF_timeseries_reconstructor():
 
 
             #### forward recursive prediction begins
-            for t in np.arange(A.shape[1], A.shape[1] + future_extrapolation_length):
+            for t in np.arange(data_test.shape[1], data_test.shape[1] + future_extrapolation_length):
                 patch = A_recons[:, t - k + L:t, :]
 
-                if t == self.data_test.shape[1]:
-                    patch = self.data_test[:, t - k + L:t, :]
+                if t == data_test.shape[1]:
+                    patch = data_test[:, t - k + L:t, :]
 
-                # print('!!!!! patch.shape', patch.shape)
+                print('!!!!! patch.shape', patch.shape)
                 patch_recons = self.predict_joint_single(patch, a2)
+                print('!!!!! patch_recons.shape', patch_recons.shape)
                 A_recons = np.append(A_recons, patch_recons, axis=1)
             print('new cases predicted final', A_recons[0, -1, 0])
 
             ### initial regulation
-            A_recons[:, 0:self.learnevery + L, :] = A[:, 0:self.learnevery + L, :]
+            A_recons[:, 0:self.learnevery + L, :] = data_test[:, 0:self.learnevery + L, :]
             ### patch the two reconstructions
             # A_recons = np.append(A_recons, A_recons[:,A.shape[1]:, :], axis=1)
 
-            # print('!!!!! A_recons', A_recons.shape)
+            print('!!!!! A_recons.shape', A_recons.shape)
 
             list_full_predictions.append(A_recons.copy())
 
@@ -1330,14 +1343,14 @@ class ONMF_timeseries_reconstructor():
                 W_total_seq.append(self.W.copy())
             for t in np.arange(k + 1, A.shape[1]):
                 ### Set self.data_test to the truncated one during [1,t]
-                A1 = A[:, :t, :]
                 prelearned_dict = None
                 if prelearned_dict_seq is not None:
                     prelearned_dict = prelearned_dict_seq[trial,t,:,:]
 
                 A_recons, W, At, Bt, code = self.ONMF_predictor(mode,
                                                                 foldername,
-                                                                data=A1,
+                                                                data_test=self.data_test[:, :t, :],
+                                                                data_train=self.data_train[:, :t, :],
                                                                 prelearned_dict=prelearned_dict,
                                                                 learn_from_future2past=learn_from_future2past,
                                                                 ini_dict=ini_dict,
